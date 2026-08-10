@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build-ios:
-    name: xcodebuild and unsigned IPA
+    name: xcodebuild, ad-hoc sign, and IPA
     runs-on: macos-15
     timeout-minutes: 20
 
@@ -56,26 +56,81 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             clean build | tee xcodebuild-ios.log
 
-      - name: Package unsigned IPA
+      - name: Ad-hoc sign and verify app
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          APP_PATH="$RUNNER_TEMP/WanLianDerivedData/Build/Products/Release-iphoneos/WanLianPrint.app"
+          test -d "$APP_PATH"
+
+          codesign \
+            --force \
+            --deep \
+            --sign - \
+            "$APP_PATH"
+
+          codesign \
+            --verify \
+            --deep \
+            --strict \
+            --verbose=2 \
+            "$APP_PATH"
+
+          test -d "$APP_PATH/_CodeSignature"
+          test -f "$APP_PATH/_CodeSignature/CodeResources"
+
+          codesign -dvvv "$APP_PATH" 2>&1 | tee "$GITHUB_WORKSPACE/codesign-info.txt"
+          otool -l "$APP_PATH/WanLianPrint" \
+            | grep -A4 LC_CODE_SIGNATURE \
+            | tee "$GITHUB_WORKSPACE/lc-code-signature.txt"
+
+      - name: Package ad-hoc signed IPA
         shell: bash
         run: |
           set -euo pipefail
           APP_PATH="$RUNNER_TEMP/WanLianDerivedData/Build/Products/Release-iphoneos/WanLianPrint.app"
           test -d "$APP_PATH"
-          PACKAGE_ROOT="$RUNNER_TEMP/WanLianUnsignedPackage"
+          PACKAGE_ROOT="$RUNNER_TEMP/WanLianAdhocPackage"
+          rm -rf "$PACKAGE_ROOT"
           mkdir -p "$PACKAGE_ROOT/Payload"
-          ditto "$APP_PATH" "$PACKAGE_ROOT/Payload/WanLianPrint.app"
-          cd "$PACKAGE_ROOT"
-          zip -qry "$GITHUB_WORKSPACE/WanLianPrint-unsigned.ipa" Payload
 
-      - name: Upload unsigned IPA and build diagnostics
+          ditto "$APP_PATH" "$PACKAGE_ROOT/Payload/WanLianPrint.app"
+
+          cd "$PACKAGE_ROOT"
+          ditto \
+            -c \
+            -k \
+            --sequesterRsrc \
+            --keepParent \
+            Payload \
+            "$GITHUB_WORKSPACE/WanLianPrint-adhoc.ipa"
+
+      - name: Verify IPA contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          unzip -l WanLianPrint-adhoc.ipa | tee ipa-contents.txt
+
+          grep -Fq "Payload/WanLianPrint.app/Info.plist" ipa-contents.txt
+          grep -Fq "Payload/WanLianPrint.app/WanLianPrint" ipa-contents.txt
+          grep -Fq "Payload/WanLianPrint.app/_CodeSignature/CodeResources" ipa-contents.txt
+
+          shasum -a 256 WanLianPrint-adhoc.ipa | tee WanLianPrint-adhoc.sha256
+
+      - name: Upload ad-hoc IPA and build diagnostics
         uses: actions/upload-artifact@v4
         with:
-          name: WanLianPrint-iOS-unsigned
+          name: WanLianPrint-iOS-adhoc
           if-no-files-found: error
           retention-days: 30
           path: |
-            WanLianPrint-unsigned.ipa
+            WanLianPrint-adhoc.ipa
             ${{ runner.temp }}/WanLianDerivedData/Build/Products/Release-iphoneos/WanLianPrint.app
+            codesign-info.txt
+            lc-code-signature.txt
+            ipa-contents.txt
+            WanLianPrint-adhoc.sha256
             ios-toolchain.txt
             xcodebuild-ios.log
