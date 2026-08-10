@@ -1,0 +1,81 @@
+name: Build iOS P0
+
+on:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/build-ios.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/build-ios.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    name: xcodebuild and unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Record toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version | tee ios-toolchain.txt
+          swift --version | tee -a ios-toolchain.txt
+
+      - name: Inspect Xcode project
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project ios/WanLianPrint/WanLianPrint.xcodeproj \
+            -scheme WanLianPrint \
+            -list
+
+      - name: Build unsigned device app
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          xcodebuild \
+            -project ios/WanLianPrint/WanLianPrint.xcodeproj \
+            -scheme WanLianPrint \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$RUNNER_TEMP/WanLianDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            clean build | tee xcodebuild-ios.log
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH="$RUNNER_TEMP/WanLianDerivedData/Build/Products/Release-iphoneos/WanLianPrint.app"
+          test -d "$APP_PATH"
+          PACKAGE_ROOT="$RUNNER_TEMP/WanLianUnsignedPackage"
+          mkdir -p "$PACKAGE_ROOT/Payload"
+          ditto "$APP_PATH" "$PACKAGE_ROOT/Payload/WanLianPrint.app"
+          cd "$PACKAGE_ROOT"
+          zip -qry "$GITHUB_WORKSPACE/WanLianPrint-unsigned.ipa" Payload
+
+      - name: Upload unsigned IPA and build diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: WanLianPrint-iOS-unsigned
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            WanLianPrint-unsigned.ipa
+            ${{ runner.temp }}/WanLianDerivedData/Build/Products/Release-iphoneos/WanLianPrint.app
+            ios-toolchain.txt
+            xcodebuild-ios.log
