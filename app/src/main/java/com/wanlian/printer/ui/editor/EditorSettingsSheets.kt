@@ -23,6 +23,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -87,6 +88,7 @@ fun EmbeddedEditorPanel(
     onToolSelected: (EditorTool) -> Unit,
     state: MainUiState,
     onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
+    onAlignPairFooters: () -> Unit,
     scrollState: ScrollState,
     panelMode: EditorPanelMode,
     onTogglePreviewSpace: () -> Unit,
@@ -177,6 +179,7 @@ fun EmbeddedEditorPanel(
                             EditorTool.FOOTER -> FooterSettingsContent(
                                 state = state,
                                 onSettingsChange = onSettingsChange,
+                                onAlignPairFooters = onAlignPairFooters,
                             )
                         }
                     }
@@ -427,14 +430,34 @@ fun LayoutSettingsContent(
 fun FooterSettingsContent(
     state: MainUiState,
     onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
+    onAlignPairFooters: () -> Unit,
 ) {
     var showFooterFontPicker by remember { mutableStateOf(false) }
     Text("落款小标签", style = MaterialTheme.typography.labelLarge)
     if (state.documentMode == DocumentMode.PAIR) {
+        val pair = state.pairDocument
+        val bothFootersEnabled = pair?.left?.footerLabel?.enabled == true &&
+            pair.right.footerLabel.enabled
         Text(
             text = "当前编辑：${state.pairDocument?.selectedSide?.label ?: "左联"}落款",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.primary,
+        )
+        OutlinedButton(
+            onClick = onAlignPairFooters,
+            enabled = bothFootersEnabled,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("以${pair?.selectedSide?.label ?: "左联"}为基准一键对齐页尾")
+        }
+        Text(
+            text = if (bothFootersEnabled) {
+                "对齐另一联的页尾底线；文字、字体和花朵样式保持不变"
+            } else {
+                "启用左右联的落款标签后可一键对齐"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
     SwitchRow(

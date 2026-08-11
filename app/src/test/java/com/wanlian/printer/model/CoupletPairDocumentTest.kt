@@ -217,6 +217,67 @@ class CoupletPairDocumentTest {
     }
 
     @Test
+    fun `one click alignment uses selected left footer as page-end baseline`() {
+        val left = PrintSettings(
+            bottomMarginMm = 18f,
+            footerLabel = FooterLabelSettings(
+                enabled = true,
+                text = "左联落款",
+                bottomMarginMm = 36f,
+                offsetYMm = -8f,
+                flower = FlowerSettings(sizeMm = 18f),
+            ),
+        )
+        val right = PrintSettings(
+            bottomMarginMm = 6f,
+            cutGuide = CutGuideSettings(enabled = true, bottomOffsetMm = 6f, notchDepthMm = 25f),
+            footerLabel = FooterLabelSettings(
+                enabled = true,
+                text = "右联落款",
+                bottomMarginMm = 4f,
+                offsetYMm = 11f,
+                flower = FlowerSettings(sizeMm = 31f),
+            ),
+        )
+        val document = CoupletPairDocument(left = left, right = right)
+        val aligned = PairFooterAlignmentRules.alignOtherToSelected(document)
+
+        assertEquals(left, aligned.left)
+        assertEquals("右联落款", aligned.right.footerLabel.text)
+        assertEquals(31f, aligned.right.footerLabel.flower.sizeMm, 0.001f)
+        assertEquals(
+            PairFooterAlignmentRules.pageEndBaselineMm(aligned.left),
+            PairFooterAlignmentRules.pageEndBaselineMm(aligned.right),
+            0.001f,
+        )
+    }
+
+    @Test
+    fun `one click alignment uses selected right footer without changing its settings`() {
+        val left = PrintSettings(
+            bottomMarginMm = 9f,
+            footerLabel = FooterLabelSettings(enabled = true, bottomMarginMm = 7f, offsetYMm = 4f),
+        )
+        val right = PrintSettings(
+            bottomMarginMm = 22f,
+            footerLabel = FooterLabelSettings(enabled = true, bottomMarginMm = 48f, offsetYMm = -9f),
+        )
+        val document = CoupletPairDocument(
+            left = left,
+            right = right,
+            selectedSide = CoupletSide.RIGHT,
+        )
+        val aligned = PairFooterAlignmentRules.alignOtherToSelected(document)
+
+        assertEquals(right, aligned.right)
+        assertEquals(
+            PairFooterAlignmentRules.pageEndBaselineMm(aligned.right),
+            PairFooterAlignmentRules.pageEndBaselineMm(aligned.left),
+            0.001f,
+        )
+    }
+
+    @Test
     fun `footer vertical and horizontal orientations create different text runs`() {
         val vertical = FooterLabelSettings(
             text = "阿里巴巴集团\n敬挽",

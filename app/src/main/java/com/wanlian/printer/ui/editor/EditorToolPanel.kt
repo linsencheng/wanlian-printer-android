@@ -28,6 +28,7 @@ import com.wanlian.printer.model.PrintSettings
 fun EditorToolPanel(
     state: MainUiState,
     onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
+    onAlignPairFooters: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var selectedTool by remember { mutableStateOf(EditorTool.TEXT) }
@@ -62,7 +63,11 @@ fun EditorToolPanel(
                     EditorTool.TEXT -> TextSettingsContent(state.settings, onSettingsChange)
                     EditorTool.BORDER -> BorderSettingsContent(state.settings, onSettingsChange)
                     EditorTool.LAYOUT -> LayoutSettingsContent(state.settings, state.preview, onSettingsChange)
-                    EditorTool.FOOTER -> FooterSettingsContent(state, onSettingsChange)
+                    EditorTool.FOOTER -> FooterSettingsContent(
+                        state = state,
+                        onSettingsChange = onSettingsChange,
+                        onAlignPairFooters = onAlignPairFooters,
+                    )
                 }
             }
         }
