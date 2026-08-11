@@ -621,10 +621,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val footer = settings.footerLabel.copy(
             fontId = availableOrDefault(settings.footerLabel.fontId),
-            personFontId = availableOrDefault(settings.footerLabel.personFontId),
+        )
+        val personBlock = settings.personBlock.copy(
+            fontId = availableOrDefault(settings.personBlock.fontId),
         )
         return settings.copy(
             fontId = availableOrDefault(settings.fontId),
+            personBlock = personBlock,
             footerLabel = footer,
         ) to missing
     }

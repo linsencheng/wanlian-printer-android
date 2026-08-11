@@ -10,6 +10,7 @@ import com.wanlian.printer.model.BorderPosition
 import com.wanlian.printer.model.BorderTemplate
 import com.wanlian.printer.model.CoupletPairDocument
 import com.wanlian.printer.model.PairLayoutRules
+import com.wanlian.printer.model.PersonPlacementMode
 import com.wanlian.printer.model.PrintSettings
 import com.wanlian.printer.model.PrintLayoutRules
 import com.wanlian.printer.model.PrintUnits
@@ -30,6 +31,15 @@ data class RenderedBitmap(
     val paperLengthMm: Float,
     val effectiveFontSizeDots: Float,
     val mainAreaWidthMm: Float = paperWidthMm,
+    val personBlockBounds: PersonBlockPreviewBounds? = null,
+    val personBlockDraggable: Boolean = false,
+)
+
+data class PersonBlockPreviewBounds(
+    val leftNorm: Float,
+    val topNorm: Float,
+    val rightNorm: Float,
+    val bottomNorm: Float,
 )
 
 data class RenderedCoupletPair(
@@ -41,6 +51,7 @@ data class RenderedCoupletPair(
 class BitmapRenderer(
     private val borderRenderer: BorderRenderer = BorderRenderer(),
     private val footerLabelRenderer: FooterLabelRenderer = FooterLabelRenderer(),
+    private val personBlockRenderer: PersonBlockRenderer = PersonBlockRenderer(),
     private val cutGuideRenderer: CutGuideRenderer = CutGuideRenderer(),
 ) {
     fun requiredCoupletLengthMm(settings: PrintSettings): Float {
@@ -49,8 +60,14 @@ class BitmapRenderer(
         val borderGeometry = calculateBorderGeometry(settings, widthDots)
         val columns = normalizedColumns(settings.text)
         val textLayout = calculateTextLayout(columns, borderGeometry.textWidthDots, settings)
+        val inlineFlow = calculateInlinePersonFlow(
+            settings = settings,
+            columns = columns,
+            textLayout = textLayout,
+            availableWidthDots = borderGeometry.textWidthDots.toFloat(),
+        )
         val mainContentBottom = PrintUnits.mmToDots(settings.topMarginMm.coerceAtLeast(0f)) +
-            textLayout.contentHeightDots
+            textLayout.contentHeightDots + inlineFlow.extraHeightDots
         val footerMetrics = footerLabelRenderer.measure(
             settings.footerLabel,
             borderGeometry.textWidthDots.toFloat(),
@@ -112,7 +129,13 @@ class BitmapRenderer(
         val textLayout = calculateTextLayout(columns, borderGeometry.textWidthDots, settings)
         val topMargin = PrintUnits.mmToDots(settings.topMarginMm.coerceAtLeast(0f))
         val bottomMargin = PrintUnits.mmToDots(settings.bottomMarginMm.coerceAtLeast(0f))
-        val mainContentBottom = topMargin + textLayout.contentHeightDots
+        val inlineFlow = calculateInlinePersonFlow(
+            settings = settings,
+            columns = columns,
+            textLayout = textLayout,
+            availableWidthDots = borderGeometry.textWidthDots.toFloat(),
+        )
+        val mainContentBottom = topMargin + textLayout.contentHeightDots + inlineFlow.extraHeightDots
         val footerMetrics = footerLabelRenderer.measure(
             settings.footerLabel,
             borderGeometry.textWidthDots.toFloat(),
@@ -152,6 +175,25 @@ class BitmapRenderer(
             PrintUnits.mmToDots(settings.paperLengthMm.coerceIn(20f, 1500f))
         }.coerceIn(1, MAX_BITMAP_HEIGHT_DOTS)
 
+        val reservedBelowFooter = footerBottomMargin + bottomMargin + cutGuideReserve
+        val footerTop = if (settings.footerLabel.enabled) {
+            val preferredFooterTop = heightDots - reservedBelowFooter - footerMetrics.totalHeightDots
+            val minimumFooterTop = mainContentBottom + footerDistance
+            max(preferredFooterTop, minimumFooterTop)
+        } else {
+            null
+        }
+        val personSafeBottom = (heightDots - bottomMargin).toFloat()
+            .coerceAtLeast(topMargin.toFloat() + 1f)
+        val personLayout = personBlockRenderer.layout(
+            settings = settings.personBlock,
+            safeLeft = borderGeometry.textStartX.toFloat(),
+            safeTop = topMargin.toFloat(),
+            safeRight = (borderGeometry.textStartX + borderGeometry.textWidthDots).toFloat(),
+            safeBottom = personSafeBottom,
+            inlineTop = inlineFlow.blockTopDots?.let { topMargin + it },
+        )
+
         val surfaces = createSurfaces(widthDots, heightDots)
         drawVerticalText(
             surfaces = surfaces,
@@ -161,13 +203,15 @@ class BitmapRenderer(
             areaStartX = borderGeometry.textStartX,
             areaWidthDots = borderGeometry.textWidthDots,
             topDots = topMargin.toFloat(),
+            inlineInsertIndex = inlineFlow.insertIndex,
+            inlineShiftDots = inlineFlow.extraHeightDots,
         )
+        personLayout?.let { layout ->
+            personBlockRenderer.draw(surfaces.maskCanvas, settings.personBlock, layout)
+            personBlockRenderer.draw(surfaces.previewCanvas, settings.personBlock, layout)
+        }
         drawBorders(surfaces, settings, borderGeometry, heightDots)
-        if (settings.footerLabel.enabled) {
-            val reservedBelowFooter = footerBottomMargin + bottomMargin + cutGuideReserve
-            val preferredFooterTop = heightDots - reservedBelowFooter - footerMetrics.totalHeightDots
-            val minimumFooterTop = mainContentBottom + footerDistance
-            val footerTop = max(preferredFooterTop, minimumFooterTop)
+        if (footerTop != null) {
             drawFooterLabel(
                 surfaces = surfaces,
                 settings = settings,
@@ -184,6 +228,9 @@ class BitmapRenderer(
             paperLengthMm = PrintUnits.dotsToMm(heightDots),
             effectiveFontSizeDots = textLayout.fontSizeDots,
             mainAreaWidthMm = PrintUnits.dotsToMm(borderGeometry.textWidthDots),
+            personBlockBounds = personLayout?.bounds?.toPreviewBounds(widthDots, heightDots),
+            personBlockDraggable = personLayout != null &&
+                settings.personBlock.placementMode == PersonPlacementMode.SIDE_OVERLAY,
         )
     }
 
@@ -273,7 +320,37 @@ class BitmapRenderer(
         val spacing = settings.characterSpacingDots.coerceAtLeast(0f)
         val maxCharacters = columns.maxOf { it.size }
         val contentHeight = glyphHeight * maxCharacters + spacing * (maxCharacters - 1).coerceAtLeast(0)
-        return VerticalTextLayout(fontSize, glyphHeight + spacing, contentHeight)
+        return VerticalTextLayout(fontSize, glyphHeight, glyphHeight + spacing, contentHeight)
+    }
+
+    private fun calculateInlinePersonFlow(
+        settings: PrintSettings,
+        columns: List<List<String>>,
+        textLayout: VerticalTextLayout,
+        availableWidthDots: Float,
+    ): InlinePersonFlow {
+        val personBlock = settings.personBlock
+        if (!personBlock.participatesInMainTextFlow) {
+            return InlinePersonFlow()
+        }
+        val naturalHeight = personBlockRenderer.naturalHeightDots(personBlock, availableWidthDots)
+        if (naturalHeight <= 0f) return InlinePersonFlow()
+
+        val maximumCharacters = columns.maxOfOrNull { it.size } ?: 0
+        val insertIndex = personBlock.personInsertIndex.coerceIn(0, maximumCharacters)
+        val gap = PrintUnits.mmToDots(INLINE_PERSON_GAP_MM).toFloat()
+        val gapBefore = if (insertIndex > 0) gap else 0f
+        val gapAfter = if (insertIndex < maximumCharacters) gap else 0f
+        val beforeTextHeight = if (insertIndex == 0) {
+            0f
+        } else {
+            textLayout.glyphHeightDots + (insertIndex - 1) * textLayout.characterAdvanceDots
+        }
+        return InlinePersonFlow(
+            insertIndex = insertIndex,
+            extraHeightDots = naturalHeight + gapBefore + gapAfter,
+            blockTopDots = beforeTextHeight + gapBefore,
+        )
     }
 
     private fun calculateBorderGeometry(settings: PrintSettings, widthDots: Int): BorderGeometry {
@@ -314,6 +391,8 @@ class BitmapRenderer(
         areaStartX: Int,
         areaWidthDots: Int,
         topDots: Float,
+        inlineInsertIndex: Int? = null,
+        inlineShiftDots: Float = 0f,
     ) {
         val paint = printTextPaint(layout.fontSizeDots, settings.textWeight, settings.fontId)
         val glyphWidth = layout.fontSizeDots * max(0.65f, FontRepository.resolve(settings.fontId).textScaleX)
@@ -329,7 +408,15 @@ class BitmapRenderer(
         columns.forEachIndexed { columnIndex, characters ->
             val x = rightColumnCenter - columnIndex * (glyphWidth + gap)
             characters.forEachIndexed { characterIndex, character ->
-                val baseline = topDots + characterIndex * layout.characterAdvanceDots - metrics.ascent
+                val flowShift = if (
+                    inlineInsertIndex != null && characterIndex >= inlineInsertIndex
+                ) {
+                    inlineShiftDots
+                } else {
+                    0f
+                }
+                val baseline = topDots + characterIndex * layout.characterAdvanceDots +
+                    flowShift - metrics.ascent
                 surfaces.maskCanvas.drawText(character, x, baseline, paint)
                 surfaces.previewCanvas.drawText(character, x, baseline, paint)
             }
@@ -459,8 +546,15 @@ class BitmapRenderer(
 
     private data class VerticalTextLayout(
         val fontSizeDots: Float,
+        val glyphHeightDots: Float,
         val characterAdvanceDots: Float,
         val contentHeightDots: Float,
+    )
+
+    private data class InlinePersonFlow(
+        val insertIndex: Int? = null,
+        val extraHeightDots: Float = 0f,
+        val blockTopDots: Float? = null,
     )
 
     private data class BorderGeometry(
@@ -485,5 +579,16 @@ class BitmapRenderer(
         private const val MIN_FONT_SIZE_DOTS = 8f
         private const val MAX_FONT_SIZE_DOTS = 420f
         private const val MAX_BITMAP_HEIGHT_DOTS = 16_000
+        private const val INLINE_PERSON_GAP_MM = 3f
     }
 }
+
+private fun PersonBlockBounds.toPreviewBounds(
+    widthDots: Int,
+    heightDots: Int,
+): PersonBlockPreviewBounds = PersonBlockPreviewBounds(
+    leftNorm = (left / widthDots.coerceAtLeast(1)).coerceIn(0f, 1f),
+    topNorm = (top / heightDots.coerceAtLeast(1)).coerceIn(0f, 1f),
+    rightNorm = (right / widthDots.coerceAtLeast(1)).coerceIn(0f, 1f),
+    bottomNorm = (bottom / heightDots.coerceAtLeast(1)).coerceIn(0f, 1f),
+)

@@ -46,8 +46,11 @@ import com.wanlian.printer.model.FlowerAdjustmentLimits
 import com.wanlian.printer.model.FooterLabelPosition
 import com.wanlian.printer.model.FooterTextOrientation
 import com.wanlian.printer.model.FooterPerson
+import com.wanlian.printer.model.PersonBlockHorizontalPreset
+import com.wanlian.printer.model.PersonBlockSettings
 import com.wanlian.printer.model.PersonLayout
 import com.wanlian.printer.model.PersonLayoutRules
+import com.wanlian.printer.model.PersonPlacementMode
 import com.wanlian.printer.model.PrintSettings
 import com.wanlian.printer.model.PrintUnits
 import com.wanlian.printer.model.TextHorizontalAlignment
@@ -231,6 +234,10 @@ fun TextSettingsContent(
         label = { it.label },
         onSelected = { weight -> onSettingsChange { it.copy(textWeight = weight) } },
     )
+    PersonSettingsSection(
+        settings = settings,
+        onSettingsChange = onSettingsChange,
+    )
     CompactNumberControl(
         title = "顶部空白",
         value = settings.topMarginMm,
@@ -250,7 +257,19 @@ fun TextSettingsContent(
     if (showFontPicker) {
         FontPickerDialog(
             selectedFontId = settings.fontId,
-            onSelected = { font -> onSettingsChange { it.copy(fontId = font.id) } },
+            onSelected = { font ->
+                onSettingsChange { current ->
+                    val personFontWasFollowingBody = current.personBlock.fontId == current.fontId
+                    current.copy(
+                        fontId = font.id,
+                        personBlock = if (personFontWasFollowingBody) {
+                            current.personBlock.copy(fontId = font.id)
+                        } else {
+                            current.personBlock
+                        },
+                    )
+                }
+            },
             onDismiss = { showFontPicker = false },
         )
     }
@@ -403,7 +422,6 @@ fun FooterSettingsContent(
     onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
 ) {
     var showFooterFontPicker by remember { mutableStateOf(false) }
-    var showPersonFontPicker by remember { mutableStateOf(false) }
     Text("落款小标签", style = MaterialTheme.typography.labelLarge)
     SwitchRow(
         title = "启用落款标签",
@@ -414,11 +432,6 @@ fun FooterSettingsContent(
         },
     )
     if (state.settings.footerLabel.enabled) {
-        PersonSettingsSection(
-            state = state,
-            onSettingsChange = onSettingsChange,
-            onOpenFontPicker = { showPersonFontPicker = true },
-        )
         OutlinedTextField(
             value = state.settings.footerLabel.text,
             onValueChange = { value ->
@@ -691,12 +704,330 @@ fun FooterSettingsContent(
             onDismiss = { showFooterFontPicker = false },
         )
     }
+}
+
+@Composable
+private fun PersonSettingsSection(
+    settings: PrintSettings,
+    onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
+) {
+    var showPersonFontPicker by remember { mutableStateOf(false) }
+    val block = settings.personBlock
+    HorizontalDivider()
+    Text("人员姓名", style = MaterialTheme.typography.labelLarge)
+    SwitchRow(
+        title = "启用人员姓名",
+        subtitle = if (block.persons.isEmpty()) {
+            "开启后可添加 1～6 人"
+        } else {
+            "已设置 ${block.persons.size} 人"
+        },
+        checked = block.enabled,
+        onCheckedChange = { enabled ->
+            onSettingsChange { current ->
+                current.copy(
+                    personBlock = current.personBlock.copy(
+                        enabled = enabled,
+                        persons = if (enabled && current.personBlock.persons.isEmpty()) {
+                            listOf(FooterPerson())
+                        } else {
+                            current.personBlock.persons
+                        },
+                    ),
+                )
+            }
+        },
+    )
+    if (block.enabled) {
+        Text("姓名排列", style = MaterialTheme.typography.labelLarge)
+        ChoiceChips(
+            values = PersonLayout.entries,
+            selected = block.layout,
+            label = { it.label },
+            onSelected = { layout ->
+                onSettingsChange { current ->
+                    current.copy(personBlock = current.personBlock.copy(layout = layout))
+                }
+            },
+        )
+        Text("姓名位置", style = MaterialTheme.typography.labelLarge)
+        ChoiceChips(
+            values = PersonPlacementMode.entries,
+            selected = block.placementMode,
+            label = { it.label },
+            onSelected = { placementMode ->
+                onSettingsChange { current ->
+                    current.copy(
+                        personBlock = current.personBlock.copy(placementMode = placementMode),
+                    )
+                }
+            },
+        )
+        Text(
+            if (block.layout == PersonLayout.PARALLEL_COLUMNS) {
+                "每个人各占一列、列内竖排，并从同一顶部开始。"
+            } else {
+                "所有人员按顺序接成一列竖排。"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text("人员列表（1～6 人）", style = MaterialTheme.typography.labelLarge)
+        block.persons.forEachIndexed { index, person ->
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                ),
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text("人员 ${index + 1}", style = MaterialTheme.typography.labelMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = person.relation,
+                            onValueChange = { relation ->
+                                onSettingsChange { current ->
+                                    val updated = current.personBlock.persons.toMutableList().apply {
+                                        this[index] = this[index].copy(relation = relation)
+                                    }
+                                    current.copy(personBlock = current.personBlock.copy(persons = updated))
+                                }
+                            },
+                            modifier = Modifier.weight(0.38f),
+                            label = { Text("称谓") },
+                            singleLine = true,
+                        )
+                        OutlinedTextField(
+                            value = person.name,
+                            onValueChange = { name ->
+                                onSettingsChange { current ->
+                                    val updated = current.personBlock.persons.toMutableList().apply {
+                                        this[index] = this[index].copy(name = name)
+                                    }
+                                    current.copy(personBlock = current.personBlock.copy(persons = updated))
+                                }
+                            },
+                            modifier = Modifier.weight(0.62f),
+                            label = { Text("姓名") },
+                            singleLine = true,
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        TextButton(
+                            onClick = {
+                                onSettingsChange { current ->
+                                    if (index == 0) current else {
+                                        val updated = current.personBlock.persons.toMutableList()
+                                        val moved = updated.removeAt(index)
+                                        updated.add(index - 1, moved)
+                                        current.copy(personBlock = current.personBlock.copy(persons = updated))
+                                    }
+                                }
+                            },
+                            enabled = index > 0,
+                        ) { Text("上移") }
+                        TextButton(
+                            onClick = {
+                                onSettingsChange { current ->
+                                    if (index >= current.personBlock.persons.lastIndex) current else {
+                                        val updated = current.personBlock.persons.toMutableList()
+                                        val moved = updated.removeAt(index)
+                                        updated.add(index + 1, moved)
+                                        current.copy(personBlock = current.personBlock.copy(persons = updated))
+                                    }
+                                }
+                            },
+                            enabled = index < block.persons.lastIndex,
+                        ) { Text("下移") }
+                        TextButton(
+                            onClick = {
+                                onSettingsChange { current ->
+                                    val updated = current.personBlock.persons.toMutableList().apply {
+                                        if (index in indices) removeAt(index)
+                                    }
+                                    current.copy(personBlock = current.personBlock.copy(persons = updated))
+                                }
+                            },
+                        ) { Text("删除") }
+                    }
+                }
+            }
+        }
+        if (block.persons.size < PersonLayoutRules.MAX_PERSONS) {
+            TextButton(
+                onClick = {
+                    onSettingsChange { current ->
+                        current.copy(
+                            personBlock = current.personBlock.copy(
+                                persons = current.personBlock.persons + FooterPerson(),
+                            ),
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("+ 添加人员（最多 6 人）") }
+        }
+        if (block.persons.isNotEmpty()) {
+            FontSelectorRow(
+                fontId = block.fontId,
+                label = "姓名字体",
+                onClick = { showPersonFontPicker = true },
+            )
+            TextButton(
+                onClick = {
+                    onSettingsChange { current ->
+                        current.copy(personBlock = current.personBlock.copy(fontId = current.fontId))
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("使用正文字体") }
+            CompactNumberControl(
+                title = "姓名字号",
+                value = block.fontSizeDots,
+                unit = "dots",
+                valueRange = PersonLayoutRules.MIN_FONT_SIZE_DOTS..PersonLayoutRules.MAX_FONT_SIZE_DOTS,
+                step = 2f,
+                decimals = 0,
+                onValueChange = { value ->
+                    onSettingsChange { current ->
+                        current.copy(personBlock = current.personBlock.copy(fontSizeDots = value))
+                    }
+                },
+            )
+            CompactNumberControl(
+                title = "姓名字间距",
+                value = block.characterSpacingDots,
+                unit = "dots",
+                valueRange = 0f..240f,
+                step = 2f,
+                decimals = 0,
+                onValueChange = { value ->
+                    onSettingsChange { current ->
+                        current.copy(
+                            personBlock = current.personBlock.copy(characterSpacingDots = value),
+                        )
+                    }
+                },
+            )
+            if (block.placementMode == PersonPlacementMode.SIDE_OVERLAY) {
+                Text("水平位置", style = MaterialTheme.typography.labelLarge)
+                ChoiceChips(
+                    values = PersonBlockHorizontalPreset.entries,
+                    selected = PersonBlockHorizontalPreset.resolve(
+                        block.positionXNorm,
+                        block.offsetXMm,
+                    ),
+                    label = { it.label },
+                    onSelected = { preset ->
+                        preset.positionXNorm?.let { position ->
+                            onSettingsChange { current ->
+                                current.copy(
+                                    personBlock = current.personBlock.copy(
+                                        positionXNorm = position,
+                                        offsetXMm = 0f,
+                                    ),
+                                )
+                            }
+                        }
+                    },
+                )
+                CompactNumberControl(
+                    title = "水平微调",
+                    value = block.offsetXMm,
+                    unit = "mm",
+                    valueRange = PersonBlockSettings.MIN_OFFSET_X_MM..
+                        PersonBlockSettings.MAX_OFFSET_X_MM,
+                    step = 1f,
+                    onValueChange = { value ->
+                        onSettingsChange { current ->
+                            current.copy(personBlock = current.personBlock.copy(offsetXMm = value))
+                        }
+                    },
+                )
+                CompactNumberControl(
+                    title = "垂直微调",
+                    value = block.offsetYMm,
+                    unit = "mm",
+                    valueRange = PersonBlockSettings.MIN_OFFSET_Y_MM..
+                        PersonBlockSettings.MAX_OFFSET_Y_MM,
+                    step = 1f,
+                    onValueChange = { value ->
+                        onSettingsChange { current ->
+                            current.copy(personBlock = current.personBlock.copy(offsetYMm = value))
+                        }
+                    },
+                )
+                Text(
+                    "也可以直接在预览中拖动姓名。旁置不会改变正文字号或纸张长度。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                val maximumIndex = bodyCharacterCount(settings.text)
+                val resolvedIndex = block.personInsertIndex.coerceIn(0, maximumIndex)
+                CompactNumberControl(
+                    title = "插入位置（第 $resolvedIndex 字后）",
+                    value = resolvedIndex.toFloat(),
+                    unit = "字",
+                    valueRange = 0f..maximumIndex.coerceAtLeast(1).toFloat(),
+                    step = 1f,
+                    decimals = 0,
+                    onValueChange = { value ->
+                        onSettingsChange { current ->
+                            val maxIndex = bodyCharacterCount(current.text)
+                            current.copy(
+                                personBlock = current.personBlock.copy(
+                                    personInsertIndex = value.toInt().coerceIn(0, maxIndex),
+                                ),
+                            )
+                        }
+                    },
+                )
+                Text(
+                    "姓名块会占用正文纵向空间，并自动把插入点后的正文下移。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (block.layout == PersonLayout.PARALLEL_COLUMNS) {
+                CompactNumberControl(
+                    title = "姓名列间距",
+                    value = block.columnGapMm,
+                    unit = "mm",
+                    valueRange = PersonLayoutRules.MIN_COLUMN_GAP_MM..
+                        PersonLayoutRules.MAX_COLUMN_GAP_MM,
+                    step = 1f,
+                    onValueChange = { value ->
+                        onSettingsChange { current ->
+                            current.copy(personBlock = current.personBlock.copy(columnGapMm = value))
+                        }
+                    },
+                )
+                val resolved = PersonLayoutRules.resolveParallelColumns(
+                    personCount = block.persons.size.coerceAtLeast(1),
+                    requestedFontSizeDots = block.fontSizeDots,
+                    requestedColumnGapMm = block.columnGapMm,
+                    availableWidthDots = PrintUnits.mmToDots(settings.paperWidthMm).toFloat(),
+                    fontWidthScale = FontRepository.resolve(block.fontId).textScaleX,
+                )
+                if (resolved.wasAutoReduced) {
+                    Text(
+                        "当前人员较多，请减小姓名字号或列间距。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+    }
     if (showPersonFontPicker) {
         FontPickerDialog(
-            selectedFontId = state.settings.footerLabel.personFontId,
+            selectedFontId = block.fontId,
             onSelected = { font ->
                 onSettingsChange { current ->
-                    current.copy(footerLabel = current.footerLabel.copy(personFontId = font.id))
+                    current.copy(personBlock = current.personBlock.copy(fontId = font.id))
                 }
             },
             onDismiss = { showPersonFontPicker = false },
@@ -704,206 +1035,11 @@ fun FooterSettingsContent(
     }
 }
 
-@Composable
-private fun PersonSettingsSection(
-    state: MainUiState,
-    onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
-    onOpenFontPicker: () -> Unit,
-) {
-    val footer = state.settings.footerLabel
-    Text("姓名排列", style = MaterialTheme.typography.labelLarge)
-    ChoiceChips(
-        values = PersonLayout.entries,
-        selected = footer.personLayout,
-        label = { it.label },
-        onSelected = { layout ->
-            onSettingsChange { current ->
-                current.copy(footerLabel = current.footerLabel.copy(personLayout = layout))
-            }
-        },
-    )
-    Text(
-        if (footer.personLayout == PersonLayout.PARALLEL_COLUMNS) {
-            "每个人各占一列、列内竖排，并从同一顶部开始。"
-        } else {
-            "所有人员按顺序接成一列竖排。"
-        },
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Text("人员姓名（1～6 人）", style = MaterialTheme.typography.labelLarge)
-    footer.persons.forEachIndexed { index, person ->
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-            ),
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text("人员 ${index + 1}", style = MaterialTheme.typography.labelMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = person.relation,
-                        onValueChange = { relation ->
-                            onSettingsChange { current ->
-                                val updated = current.footerLabel.persons.toMutableList().apply {
-                                    this[index] = this[index].copy(relation = relation)
-                                }
-                                current.copy(footerLabel = current.footerLabel.copy(persons = updated))
-                            }
-                        },
-                        modifier = Modifier.weight(0.38f),
-                        label = { Text("称谓") },
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = person.name,
-                        onValueChange = { name ->
-                            onSettingsChange { current ->
-                                val updated = current.footerLabel.persons.toMutableList().apply {
-                                    this[index] = this[index].copy(name = name)
-                                }
-                                current.copy(footerLabel = current.footerLabel.copy(persons = updated))
-                            }
-                        },
-                        modifier = Modifier.weight(0.62f),
-                        label = { Text("姓名") },
-                        singleLine = true,
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    TextButton(
-                        onClick = {
-                            onSettingsChange { current ->
-                                if (index == 0) current else {
-                                    val updated = current.footerLabel.persons.toMutableList()
-                                    val moved = updated.removeAt(index)
-                                    updated.add(index - 1, moved)
-                                    current.copy(footerLabel = current.footerLabel.copy(persons = updated))
-                                }
-                            }
-                        },
-                        enabled = index > 0,
-                    ) { Text("上移") }
-                    TextButton(
-                        onClick = {
-                            onSettingsChange { current ->
-                                if (index >= current.footerLabel.persons.lastIndex) current else {
-                                    val updated = current.footerLabel.persons.toMutableList()
-                                    val moved = updated.removeAt(index)
-                                    updated.add(index + 1, moved)
-                                    current.copy(footerLabel = current.footerLabel.copy(persons = updated))
-                                }
-                            }
-                        },
-                        enabled = index < footer.persons.lastIndex,
-                    ) { Text("下移") }
-                    TextButton(
-                        onClick = {
-                            onSettingsChange { current ->
-                                val updated = current.footerLabel.persons.toMutableList().apply {
-                                    if (index in indices) removeAt(index)
-                                }
-                                current.copy(footerLabel = current.footerLabel.copy(persons = updated))
-                            }
-                        },
-                    ) { Text("删除") }
-                }
-            }
-        }
-    }
-    if (footer.persons.size < PersonLayoutRules.MAX_PERSONS) {
-        TextButton(
-            onClick = {
-                onSettingsChange { current ->
-                    current.copy(
-                        footerLabel = current.footerLabel.copy(
-                            persons = current.footerLabel.persons + FooterPerson(),
-                        ),
-                    )
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("+ 添加人员（最多 6 人）") }
-    }
-    if (footer.persons.isNotEmpty()) {
-        FontSelectorRow(
-            fontId = footer.personFontId,
-            label = "姓名字体",
-            onClick = onOpenFontPicker,
-        )
-        CompactNumberControl(
-            title = "姓名字号",
-            value = footer.personFontSizeDots,
-            unit = "dots",
-            valueRange = PersonLayoutRules.MIN_FONT_SIZE_DOTS..PersonLayoutRules.MAX_FONT_SIZE_DOTS,
-            step = 2f,
-            decimals = 0,
-            onValueChange = { value ->
-                onSettingsChange { current ->
-                    current.copy(footerLabel = current.footerLabel.copy(personFontSizeDots = value))
-                }
-            },
-        )
-        CompactNumberControl(
-            title = "姓名区域水平偏移",
-            value = footer.personGroupOffsetXMm,
-            unit = "mm",
-            valueRange = PersonLayoutRules.MIN_GROUP_OFFSET_MM..PersonLayoutRules.MAX_GROUP_OFFSET_MM,
-            step = 1f,
-            onValueChange = { value ->
-                onSettingsChange { current ->
-                    current.copy(footerLabel = current.footerLabel.copy(personGroupOffsetXMm = value))
-                }
-            },
-        )
-        CompactNumberControl(
-            title = "姓名区域垂直位置",
-            value = footer.personGroupOffsetYMm,
-            unit = "mm",
-            valueRange = PersonLayoutRules.MIN_GROUP_OFFSET_MM..PersonLayoutRules.MAX_GROUP_OFFSET_MM,
-            step = 1f,
-            onValueChange = { value ->
-                onSettingsChange { current ->
-                    current.copy(footerLabel = current.footerLabel.copy(personGroupOffsetYMm = value))
-                }
-            },
-        )
-        if (footer.personLayout == PersonLayout.PARALLEL_COLUMNS) {
-            CompactNumberControl(
-                title = "姓名列间距",
-                value = footer.personColumnGapMm,
-                unit = "mm",
-                valueRange = PersonLayoutRules.MIN_COLUMN_GAP_MM..PersonLayoutRules.MAX_COLUMN_GAP_MM,
-                step = 1f,
-                onValueChange = { value ->
-                    onSettingsChange { current ->
-                        current.copy(footerLabel = current.footerLabel.copy(personColumnGapMm = value))
-                    }
-                },
-            )
-            val availableWidthDots = PrintUnits.mmToDots(
-                state.preview?.mainAreaWidthMm ?: state.settings.paperWidthMm,
-            ).toFloat()
-            val resolved = PersonLayoutRules.resolveParallelColumns(
-                personCount = footer.persons.size.coerceAtLeast(1),
-                requestedFontSizeDots = footer.personFontSizeDots,
-                requestedColumnGapMm = footer.personColumnGapMm,
-                availableWidthDots = availableWidthDots,
-                fontWidthScale = FontRepository.resolve(footer.personFontId).textScaleX,
-            )
-            if (resolved.wasAutoReduced) {
-                Text(
-                    "当前人员较多，请减小姓名字号或列间距。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-        }
-    }
-}
+private fun bodyCharacterCount(text: String): Int = text.lineSequence()
+    .map(String::trim)
+    .filter(String::isNotEmpty)
+    .maxOfOrNull { line -> line.codePointCount(0, line.length) }
+    ?: 0
 
 @Composable
 private fun CompactToolContent(
@@ -929,6 +1065,10 @@ private fun CompactToolContent(
                 step = 2f,
                 decimals = 0,
                 onValueChange = { value -> onSettingsChange { it.copy(characterSpacingDots = value) } },
+            )
+            PersonSettingsSection(
+                settings = state.settings,
+                onSettingsChange = onSettingsChange,
             )
         }
         EditorTool.BORDER -> {
@@ -965,21 +1105,10 @@ private fun CompactToolContent(
                     onSettingsChange { current -> current.copy(footerLabel = current.footerLabel.copy(enabled = enabled)) }
                 },
             )
-            if (state.settings.footerLabel.enabled) {
-                Text("姓名排列", style = MaterialTheme.typography.labelLarge)
-                ChoiceChips(
-                    values = PersonLayout.entries,
-                    selected = state.settings.footerLabel.personLayout,
-                    label = { it.label },
-                    onSelected = { layout ->
-                        onSettingsChange { current ->
-                            current.copy(
-                                footerLabel = current.footerLabel.copy(personLayout = layout),
-                            )
-                        }
-                    },
-                )
-            }
+            InfoValueRow(
+                "人员姓名",
+                "${state.settings.personBlock.persons.size} 人 · 在“文本”中设置",
+            )
             InfoValueRow(
                 "裁切线",
                 if (state.settings.cutGuide.enabled) state.settings.cutGuide.style.label else "关闭",

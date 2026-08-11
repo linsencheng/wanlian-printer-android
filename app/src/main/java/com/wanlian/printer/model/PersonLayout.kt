@@ -11,7 +11,6 @@ data class FooterPerson(
 ) {
     val verticalText: String get() = relation.trim() + name.trim()
 }
-
 enum class PersonLayout(val label: String) {
     SEQUENTIAL("依次"),
     PARALLEL_COLUMNS("并排"),
@@ -30,7 +29,7 @@ object PersonLayoutRules {
     const val MIN_PERSONS = 1
     const val MAX_PERSONS = 6
     const val MIN_FONT_SIZE_DOTS = 20f
-    const val MAX_FONT_SIZE_DOTS = 120f
+    const val MAX_FONT_SIZE_DOTS = 240f
     const val MIN_COLUMN_GAP_MM = 0f
     const val MAX_COLUMN_GAP_MM = 20f
     const val MIN_GROUP_OFFSET_MM = -100f
@@ -83,34 +82,3 @@ object PersonLayoutRules {
         )
     }
 }
-
-/** Pure snapshot used by the local template repository for lossless person-layout persistence. */
-data class PersonLayoutState(
-    val persons: List<FooterPerson>,
-    val layout: PersonLayout,
-    val columnGapMm: Float,
-    val groupOffsetXMm: Float,
-    val groupOffsetYMm: Float,
-    val fontId: String,
-    val fontSizeDots: Float,
-)
-
-fun FooterLabelSettings.personLayoutState(): PersonLayoutState = PersonLayoutState(
-    persons = persons,
-    layout = personLayout,
-    columnGapMm = personColumnGapMm,
-    groupOffsetXMm = personGroupOffsetXMm,
-    groupOffsetYMm = personGroupOffsetYMm,
-    fontId = personFontId,
-    fontSizeDots = personFontSizeDots,
-)
-
-fun FooterLabelSettings.withPersonLayoutState(state: PersonLayoutState): FooterLabelSettings = copy(
-    persons = state.persons,
-    personLayout = state.layout,
-    personColumnGapMm = state.columnGapMm,
-    personGroupOffsetXMm = state.groupOffsetXMm,
-    personGroupOffsetYMm = state.groupOffsetYMm,
-    personFontId = state.fontId,
-    personFontSizeDots = state.fontSizeDots,
-)

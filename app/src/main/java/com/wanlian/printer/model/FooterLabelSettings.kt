@@ -11,13 +11,6 @@ data class FooterLabelSettings(
     val bottomMarginMm: Float = 12f,
     val position: FooterLabelPosition = FooterLabelPosition.CENTER,
     val orientation: FooterTextOrientation = FooterTextOrientation.VERTICAL,
-    val persons: List<FooterPerson> = emptyList(),
-    val personLayout: PersonLayout = PersonLayout.SEQUENTIAL,
-    val personColumnGapMm: Float = 6f,
-    val personGroupOffsetXMm: Float = 0f,
-    val personGroupOffsetYMm: Float = 0f,
-    val personFontId: String = "elegant-song",
-    val personFontSizeDots: Float = 36f,
     val flower: FlowerSettings = FlowerSettings(),
 )
 

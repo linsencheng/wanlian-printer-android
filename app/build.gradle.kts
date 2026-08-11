@@ -1,8 +1,25 @@
+import java.time.Duration
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+val buildInstant = Instant.now()
+val automaticVersionCode = providers.environmentVariable("WANLIAN_VERSION_CODE")
+    .orNull
+    ?.toIntOrNull()
+    ?: Duration.between(Instant.parse("2024-01-01T00:00:00Z"), buildInstant).seconds.toInt()
+val automaticVersionName = providers.environmentVariable("WANLIAN_VERSION_NAME")
+    .orNull
+    ?.takeIf(String::isNotBlank)
+    ?: "1.0." + DateTimeFormatter.ofPattern("yyyyMMdd.HHmmss")
+        .withZone(ZoneId.of("Asia/Shanghai"))
+        .format(buildInstant)
 
 android {
     namespace = "com.wanlian.printer"
@@ -13,8 +30,8 @@ android {
         applicationId = "com.wanlian.printer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = automaticVersionCode
+        versionName = automaticVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true

@@ -9,10 +9,7 @@ import com.wanlian.printer.model.FooterLabelPosition
 import com.wanlian.printer.model.FooterLabelSettings
 import com.wanlian.printer.model.FooterTextLayoutRules
 import com.wanlian.printer.model.FooterTextOrientation
-import com.wanlian.printer.model.PersonLayout
-import com.wanlian.printer.model.PersonLayoutRules
 import com.wanlian.printer.model.PrintUnits
-import com.wanlian.printer.model.ResolvedPersonColumns
 import com.wanlian.printer.model.TextWeight
 import kotlin.math.max
 
@@ -23,13 +20,6 @@ data class FooterLabelMetrics(
     val textWidthDots: Float = 0f,
     val bodyTextHeightDots: Float = 0f,
     val bodyTextWidthDots: Float = 0f,
-    val personTopGapDots: Float = 0f,
-    val personGroupTopDots: Float = 0f,
-    val personGroupBottomDots: Float = 0f,
-    val personHeightDots: Float = 0f,
-    val personWidthDots: Float = 0f,
-    val effectivePersonFontSizeDots: Float = 0f,
-    val resolvedPersonColumns: ResolvedPersonColumns? = null,
 )
 
 class FooterLabelRenderer(
@@ -69,70 +59,8 @@ class FooterLabelRenderer(
             }
         }
 
-        val persons = settings.persons
-            .take(PersonLayoutRules.MAX_PERSONS)
-            .filter { it.verticalText.isNotBlank() }
-        val personTopGap = if (hasBodyText && persons.isNotEmpty()) {
-            PrintUnits.mmToDots(PERSON_TOP_GAP_MM).toFloat()
-        } else {
-            0f
-        }
-        val personDefinition = FontRepository.resolve(settings.personFontId)
-        val requestedPersonSize = settings.personFontSizeDots.coerceIn(
-            PersonLayoutRules.MIN_FONT_SIZE_DOTS,
-            PersonLayoutRules.MAX_FONT_SIZE_DOTS,
-        )
-        val resolvedColumns = if (persons.isNotEmpty() && settings.personLayout == PersonLayout.PARALLEL_COLUMNS) {
-            PersonLayoutRules.resolveParallelColumns(
-                personCount = persons.size,
-                requestedFontSizeDots = requestedPersonSize,
-                requestedColumnGapMm = settings.personColumnGapMm,
-                availableWidthDots = availableWidthDots,
-                fontWidthScale = personDefinition.textScaleX,
-            )
-        } else {
-            null
-        }
-        val effectivePersonSize = resolvedColumns?.effectiveFontSizeDots ?: requestedPersonSize
-        val personPaint = FontRepository.createPaint(
-            settings.personFontId,
-            effectivePersonSize,
-            TextWeight.NORMAL,
-        )
-        val personGlyphHeight = personPaint.fontMetrics.descent - personPaint.fontMetrics.ascent
-        val personSpacing = settings.spacingDots.coerceAtLeast(0f)
-        val (personHeight, personWidth) = when {
-            persons.isEmpty() -> 0f to 0f
-            settings.personLayout == PersonLayout.SEQUENTIAL -> {
-                val characterCount = persons.sumOf { it.verticalText.codePointCount(0, it.verticalText.length) }
-                    .coerceAtLeast(1)
-                val height = personGlyphHeight * characterCount +
-                    personSpacing * (characterCount - 1).coerceAtLeast(0)
-                height to effectivePersonSize * max(0.65f, personDefinition.textScaleX)
-            }
-            else -> {
-                val maximumCharacters = persons.maxOf {
-                    it.verticalText.codePointCount(0, it.verticalText.length)
-                }.coerceAtLeast(1)
-                val height = personGlyphHeight * maximumCharacters +
-                    personSpacing * (maximumCharacters - 1).coerceAtLeast(0)
-                height to requireNotNull(resolvedColumns).groupWidthDots
-            }
-        }
-
-        val personGroupTop = if (persons.isEmpty()) {
-            bodyHeight
-        } else {
-            bodyHeight + personTopGap + PrintUnits.mmToDots(
-                settings.personGroupOffsetYMm.coerceIn(
-                    PersonLayoutRules.MIN_GROUP_OFFSET_MM,
-                    PersonLayoutRules.MAX_GROUP_OFFSET_MM,
-                ),
-            )
-        }
-        val personGroupBottom = personGroupTop + personHeight
-        val contentHeight = max(bodyHeight, personGroupBottom).coerceAtLeast(0f)
-        val contentWidth = max(bodyWidth, personWidth)
+        val contentHeight = bodyHeight
+        val contentWidth = bodyWidth
         val flowerSize = if (!settings.flower.enabled || settings.flower.style == FlowerStyle.NONE) {
             0f
         } else {
@@ -158,13 +86,6 @@ class FooterLabelRenderer(
             textWidthDots = contentWidth,
             bodyTextHeightDots = bodyHeight,
             bodyTextWidthDots = bodyWidth,
-            personTopGapDots = personTopGap,
-            personGroupTopDots = personGroupTop,
-            personGroupBottomDots = personGroupBottom,
-            personHeightDots = personHeight,
-            personWidthDots = personWidth,
-            effectivePersonFontSizeDots = if (persons.isEmpty()) 0f else effectivePersonSize,
-            resolvedPersonColumns = resolvedColumns,
         )
     }
 
@@ -179,7 +100,6 @@ class FooterLabelRenderer(
         if (!settings.enabled) return
         val measured = measure(settings, areaWidthDots)
         drawBodyText(canvas, settings, measured, areaStartX, areaWidthDots, topDots, color)
-        drawPersons(canvas, settings, measured, areaStartX, areaWidthDots, topDots, color)
         drawFlower(canvas, settings, measured, areaStartX, areaWidthDots, topDots, color)
     }
 
@@ -231,50 +151,6 @@ class FooterLabelRenderer(
                     canvas.drawText(line, centerX, baseline, paint)
                 }
             }
-        }
-    }
-
-    private fun drawPersons(
-        canvas: Canvas,
-        settings: FooterLabelSettings,
-        measured: FooterLabelMetrics,
-        areaStartX: Float,
-        areaWidthDots: Float,
-        topDots: Float,
-        color: Int,
-    ) {
-        val persons = settings.persons
-            .take(PersonLayoutRules.MAX_PERSONS)
-            .filter { it.verticalText.isNotBlank() }
-        if (persons.isEmpty() || measured.personHeightDots <= 0f) return
-        val paint = FontRepository.createPaint(
-            settings.personFontId,
-            measured.effectivePersonFontSizeDots,
-            TextWeight.NORMAL,
-            color = color,
-        )
-        val metrics = paint.fontMetrics
-        val glyphAdvance = metrics.descent - metrics.ascent + settings.spacingDots.coerceAtLeast(0f)
-        val personLayout = PersonLayoutEngine.layout(
-            persons = persons,
-            layout = settings.personLayout,
-            areaStartX = areaStartX,
-            areaWidthDots = areaWidthDots,
-            groupTop = topDots + measured.personGroupTopDots,
-            glyphAdvanceDots = glyphAdvance,
-            glyphHeightDots = metrics.descent - metrics.ascent,
-            baselineOffsetDots = -metrics.ascent,
-            sequentialColumnWidthDots = measured.personWidthDots,
-            parallelColumns = measured.resolvedPersonColumns,
-            groupOffsetXDots = PrintUnits.mmToDots(
-                settings.personGroupOffsetXMm.coerceIn(
-                    PersonLayoutRules.MIN_GROUP_OFFSET_MM,
-                    PersonLayoutRules.MAX_GROUP_OFFSET_MM,
-                ),
-            ).toFloat(),
-        )
-        personLayout.glyphs.forEach { glyph ->
-            canvas.drawText(glyph.text, glyph.centerX, glyph.baselineY, paint)
         }
     }
 
@@ -347,7 +223,6 @@ class FooterLabelRenderer(
     }
 
     private companion object {
-        const val PERSON_TOP_GAP_MM = 3f
         const val FLOWER_GAP_MM = 3f
     }
 }

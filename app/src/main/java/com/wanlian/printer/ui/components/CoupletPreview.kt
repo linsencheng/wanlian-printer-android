@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
@@ -103,6 +105,7 @@ fun CoupletPreview(
     pairRendered: RenderedCoupletPair? = null,
     selectedSide: CoupletSide = CoupletSide.LEFT,
     onSideSelected: ((CoupletSide) -> Unit)? = null,
+    onPersonBlockMove: ((Float, Float) -> Unit)? = null,
 ) {
     val density = LocalDensity.current
     val showPair = documentMode == DocumentMode.PAIR && pairRendered != null
@@ -123,6 +126,25 @@ fun CoupletPreview(
     }
 
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
+    var personBlockDragging by remember { mutableStateOf(false) }
+    var personBlockSelected by remember { mutableStateOf(false) }
+    val activePersonBlockAvailable = if (showPair) {
+        val selectedRendered = if (selectedSide == CoupletSide.LEFT) {
+            pairRendered?.left
+        } else {
+            pairRendered?.right
+        }
+        selectedRendered?.personBlockBounds != null && selectedRendered.personBlockDraggable
+    } else {
+        rendered?.personBlockBounds != null && rendered.personBlockDraggable
+    }
+
+    LaunchedEffect(selectedSide, showPair) {
+        personBlockSelected = false
+    }
+    LaunchedEffect(activePersonBlockAvailable) {
+        if (!activePersonBlockAvailable) personBlockSelected = false
+    }
 
     fun calculateFitScale(): Float {
         if (viewportSize.width <= 0 || viewportSize.height <= 0) return MIN_SCALE
@@ -194,6 +216,7 @@ fun CoupletPreview(
             .onSizeChanged { viewportSize = it }
             .pointerInput(viewportSize, naturalWidthPx, naturalHeightPx) {
                 detectTransformGestures(panZoomLock = false) { centroid, pan, zoom, _ ->
+                    if (personBlockDragging) return@detectTransformGestures
                     val oldScale = transformState.scale
                     val gestureMinimum = min(MIN_SCALE, calculateFitScale())
                     val newScale = (oldScale * zoom).coerceIn(gestureMinimum, MAX_SCALE)
@@ -208,7 +231,10 @@ fun CoupletPreview(
                 }
             }
             .pointerInput(viewportSize, rendered?.paperWidthMm, rendered?.paperLengthMm) {
-                detectTapGestures(onDoubleTap = { fit() })
+                detectTapGestures(
+                    onTap = { personBlockSelected = false },
+                    onDoubleTap = { fit() },
+                )
             },
         contentAlignment = Alignment.Center,
     ) {
@@ -231,6 +257,14 @@ fun CoupletPreview(
                     side = CoupletSide.LEFT,
                     selected = selectedSide == CoupletSide.LEFT,
                     onSelected = onSideSelected,
+                    onPersonBlockMove = if (selectedSide == CoupletSide.LEFT) {
+                        onPersonBlockMove
+                    } else {
+                        null
+                    },
+                    onPersonBlockDraggingChanged = { personBlockDragging = it },
+                    personBlockSelected = personBlockSelected,
+                    onPersonBlockSelected = { personBlockSelected = it },
                     modifier = Modifier.requiredSize(paperWidthDp, paperHeightDp),
                 )
                 PairPreviewPage(
@@ -238,13 +272,24 @@ fun CoupletPreview(
                     side = CoupletSide.RIGHT,
                     selected = selectedSide == CoupletSide.RIGHT,
                     onSelected = onSideSelected,
+                    onPersonBlockMove = if (selectedSide == CoupletSide.RIGHT) {
+                        onPersonBlockMove
+                    } else {
+                        null
+                    },
+                    onPersonBlockDraggingChanged = { personBlockDragging = it },
+                    personBlockSelected = personBlockSelected,
+                    onPersonBlockSelected = { personBlockSelected = it },
                     modifier = Modifier.requiredSize(paperWidthDp, paperHeightDp),
                 )
             }
         } else if (rendered != null) {
-            Image(
-                bitmap = rendered.previewBitmap.asImageBitmap(),
-                contentDescription = "黑色挽联布白字排版预览",
+            PreviewPage(
+                rendered = rendered,
+                onPersonBlockMove = onPersonBlockMove,
+                onPersonBlockDraggingChanged = { personBlockDragging = it },
+                personBlockSelected = personBlockSelected,
+                onPersonBlockSelected = { personBlockSelected = it },
                 modifier = Modifier
                     .requiredSize(paperWidthDp, paperHeightDp)
                     .graphicsLayer {
@@ -257,8 +302,6 @@ fun CoupletPreview(
                     }
                     .background(Color.Black)
                     .border(1.dp, Color(0xFF777B79)),
-                contentScale = ContentScale.FillBounds,
-                filterQuality = FilterQuality.High,
             )
         } else {
             Text("正在生成预览…", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -309,6 +352,10 @@ private fun PairPreviewPage(
     side: CoupletSide,
     selected: Boolean,
     onSelected: ((CoupletSide) -> Unit)?,
+    onPersonBlockMove: ((Float, Float) -> Unit)?,
+    onPersonBlockDraggingChanged: (Boolean) -> Unit,
+    personBlockSelected: Boolean,
+    onPersonBlockSelected: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -320,13 +367,91 @@ private fun PairPreviewPage(
             )
             .then(if (onSelected == null) Modifier else Modifier.clickable { onSelected(side) }),
     ) {
+        PreviewPage(
+            rendered = rendered,
+            onPersonBlockMove = onPersonBlockMove,
+            onInteractionStart = { onSelected?.invoke(side) },
+            onPersonBlockDraggingChanged = onPersonBlockDraggingChanged,
+            personBlockSelected = personBlockSelected,
+            onPersonBlockSelected = onPersonBlockSelected,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+@Composable
+private fun PreviewPage(
+    rendered: RenderedBitmap,
+    onPersonBlockMove: ((Float, Float) -> Unit)?,
+    modifier: Modifier = Modifier,
+    onInteractionStart: (() -> Unit)? = null,
+    onPersonBlockDraggingChanged: (Boolean) -> Unit,
+    personBlockSelected: Boolean,
+    onPersonBlockSelected: (Boolean) -> Unit,
+) {
+    val density = LocalDensity.current
+    Box(modifier = modifier) {
         Image(
             bitmap = rendered.previewBitmap.asImageBitmap(),
-            contentDescription = "${side.label}黑布白字排版预览",
+            contentDescription = "黑色挽联布白字排版预览",
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.FillBounds,
             filterQuality = FilterQuality.High,
         )
+        val bounds = rendered.personBlockBounds
+        if (bounds != null && rendered.personBlockDraggable && onPersonBlockMove != null) {
+            val pageWidthDp = (rendered.paperWidthMm * NATURAL_DP_PER_MM).dp
+            val pageHeightDp = (rendered.paperLengthMm * NATURAL_DP_PER_MM).dp
+            Box(
+                modifier = Modifier
+                    .offset(
+                        x = pageWidthDp * bounds.leftNorm,
+                        y = pageHeightDp * bounds.topNorm,
+                    )
+                    .requiredSize(
+                        width = pageWidthDp * (bounds.rightNorm - bounds.leftNorm)
+                            .coerceAtLeast(0.002f),
+                        height = pageHeightDp * (bounds.bottomNorm - bounds.topNorm)
+                            .coerceAtLeast(0.002f),
+                    )
+                    .border(
+                        width = if (personBlockSelected) 1.dp else 0.dp,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.72f),
+                    )
+                    .clickable {
+                        onInteractionStart?.invoke()
+                        onPersonBlockSelected(true)
+                    }
+                    .then(
+                        if (!personBlockSelected) {
+                            Modifier
+                        } else {
+                            Modifier.pointerInput(
+                                bounds,
+                                rendered.paperWidthMm,
+                                rendered.paperLengthMm,
+                            ) {
+                                detectDragGestures(
+                                    onDragStart = {
+                                        onInteractionStart?.invoke()
+                                        onPersonBlockDraggingChanged(true)
+                                    },
+                                    onDragEnd = { onPersonBlockDraggingChanged(false) },
+                                    onDragCancel = { onPersonBlockDraggingChanged(false) },
+                                    onDrag = { change, dragAmount ->
+                                        change.consume()
+                                        val deltaXMm = dragAmount.x /
+                                            density.density / NATURAL_DP_PER_MM
+                                        val deltaYMm = dragAmount.y /
+                                            density.density / NATURAL_DP_PER_MM
+                                        onPersonBlockMove(deltaXMm, deltaYMm)
+                                    },
+                                )
+                            }
+                        },
+                    ),
+            )
+        }
     }
 }
 
@@ -388,4 +513,4 @@ private const val MIN_SCALE = 0.1f
 private const val MIN_FIT_SCALE = 0.02f
 private const val MAX_SCALE = 5f
 private const val ZOOM_STEP = 0.15f
-private const val PAIR_GAP_DP = 12
+private const val PAIR_GAP_DP = 64

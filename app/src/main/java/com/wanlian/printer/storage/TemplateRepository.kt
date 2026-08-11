@@ -22,16 +22,15 @@ import com.wanlian.printer.model.FlowerSettings
 import com.wanlian.printer.model.FlowerStyle
 import com.wanlian.printer.model.FooterLabelSettings
 import com.wanlian.printer.model.FooterPerson
-import com.wanlian.printer.model.PersonLayoutState
+import com.wanlian.printer.model.PersonBlockSettings
+import com.wanlian.printer.model.PersonPlacementMode
 import com.wanlian.printer.model.PrintDirection
 import com.wanlian.printer.model.PrintSettings
 import com.wanlian.printer.model.PrinterDevice
 import com.wanlian.printer.model.TextHorizontalAlignment
 import com.wanlian.printer.model.TextWeight
 import com.wanlian.printer.model.TemplateNameRules
-import com.wanlian.printer.model.personLayoutState
 import com.wanlian.printer.model.renamedTo
-import com.wanlian.printer.model.withPersonLayoutState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
@@ -209,12 +208,17 @@ class TemplateRepository(context: Context) {
         put("bitmapChunkSize", settings.bitmapChunkSize)
         put("chunkDelayMs", settings.chunkDelayMs)
         put("border", borderToJson(settings.border))
+        put("personBlock", personBlockToJson(settings.personBlock))
         put("footerLabel", footerLabelToJson(settings.footerLabel))
         put("cutGuide", cutGuideToJson(settings.cutGuide))
     }
 
     private fun settingsFromJson(json: JSONObject): PrintSettings {
         val defaults = PrintSettings()
+        val footerJson = json.optJSONObject("footerLabel")
+        val personBlock = json.optJSONObject("personBlock")?.let(::personBlockFromJson)
+            ?: footerJson?.let(::legacyPersonBlockFromFooterJson)
+            ?: defaults.personBlock
         return defaults.copy(
             text = json.optString("text", defaults.text),
             fontId = json.optString("fontId", defaults.fontId),
@@ -243,16 +247,14 @@ class TemplateRepository(context: Context) {
             bitmapChunkSize = json.optInt("bitmapChunkSize", defaults.bitmapChunkSize),
             chunkDelayMs = json.optLong("chunkDelayMs", defaults.chunkDelayMs),
             border = json.optJSONObject("border")?.let(::borderFromJson) ?: defaults.border,
-            footerLabel = json.optJSONObject("footerLabel")?.let(::footerLabelFromJson)
-                ?: defaults.footerLabel,
+            personBlock = personBlock,
+            footerLabel = footerJson?.let(::footerLabelFromJson) ?: defaults.footerLabel,
             cutGuide = json.optJSONObject("cutGuide")?.let(::cutGuideFromJson)
                 ?: defaults.cutGuide,
         )
     }
 
-    private fun footerLabelToJson(settings: FooterLabelSettings): JSONObject {
-        val personState = settings.personLayoutState()
-        return JSONObject().apply {
+    private fun footerLabelToJson(settings: FooterLabelSettings): JSONObject = JSONObject().apply {
         put("enabled", settings.enabled)
         put("text", settings.text)
         put("secondaryText", settings.secondaryText)
@@ -263,61 +265,11 @@ class TemplateRepository(context: Context) {
         put("bottomMarginMm", settings.bottomMarginMm)
         put("position", settings.position.name)
         put("orientation", settings.orientation.name)
-        put("personLayout", personState.layout.name)
-        put("personColumnGapMm", personState.columnGapMm)
-        put("personGroupOffsetXMm", personState.groupOffsetXMm)
-        put("personGroupOffsetYMm", personState.groupOffsetYMm)
-        put("personFontId", personState.fontId)
-        put("personFontSizeDots", personState.fontSizeDots)
-        put("persons", JSONArray().apply {
-            personState.persons.forEach { person ->
-                put(JSONObject().apply {
-                    put("id", person.id)
-                    put("relation", person.relation)
-                    put("name", person.name)
-                })
-            }
-        })
         put("flower", flowerToJson(settings.flower))
-        }
     }
 
     private fun footerLabelFromJson(json: JSONObject): FooterLabelSettings {
         val defaults = FooterLabelSettings()
-        val personState = PersonLayoutState(
-            layout = enumOrDefault(json.optString("personLayout"), defaults.personLayout),
-            columnGapMm = json.optDouble(
-                "personColumnGapMm",
-                defaults.personColumnGapMm.toDouble(),
-            ).toFloat(),
-            groupOffsetXMm = json.optDouble(
-                "personGroupOffsetXMm",
-                defaults.personGroupOffsetXMm.toDouble(),
-            ).toFloat(),
-            groupOffsetYMm = json.optDouble(
-                "personGroupOffsetYMm",
-                defaults.personGroupOffsetYMm.toDouble(),
-            ).toFloat(),
-            fontId = json.optString("personFontId", defaults.personFontId),
-            fontSizeDots = json.optDouble(
-                "personFontSizeDots",
-                defaults.personFontSizeDots.toDouble(),
-            ).toFloat(),
-            persons = json.optJSONArray("persons")?.let { array ->
-                buildList {
-                    for (index in 0 until array.length()) {
-                        val item = array.optJSONObject(index) ?: continue
-                        add(
-                            FooterPerson(
-                                relation = item.optString("relation"),
-                                name = item.optString("name"),
-                                id = item.optString("id").ifBlank { "legacy-person-$index" },
-                            ),
-                        )
-                    }
-                }
-            } ?: defaults.persons,
-        )
         return defaults.copy(
             enabled = json.optBoolean("enabled", defaults.enabled),
             text = json.optString("text", defaults.text),
@@ -338,7 +290,123 @@ class TemplateRepository(context: Context) {
             flower = json.optJSONObject("flower")?.let(::flowerFromJson) ?: defaults.flower.copy(
                 style = legacyFlowerStyle(json.optString("flowerStyle"), defaults.flower.style),
             ),
-        ).withPersonLayoutState(personState)
+        )
+    }
+
+    private fun personBlockToJson(settings: PersonBlockSettings): JSONObject = JSONObject().apply {
+        put("enabled", settings.enabled)
+        put("layout", settings.layout.name)
+        put("placementMode", settings.placementMode.name)
+        put("personInsertIndex", settings.personInsertIndex)
+        put("positionXNorm", settings.positionXNorm)
+        put("positionYNorm", settings.positionYNorm)
+        put("offsetXMm", settings.offsetXMm)
+        put("offsetYMm", settings.offsetYMm)
+        put("columnGapMm", settings.columnGapMm)
+        put("fontId", settings.fontId)
+        put("fontSizeDots", settings.fontSizeDots)
+        put("fontSizeVersion", PERSON_BLOCK_FONT_SIZE_VERSION)
+        put("characterSpacingDots", settings.characterSpacingDots)
+        put("persons", personsToJson(settings.persons))
+    }
+
+    private fun personBlockFromJson(json: JSONObject): PersonBlockSettings {
+        val defaults = PersonBlockSettings()
+        val savedFontSize = json.optDouble(
+            "fontSizeDots",
+            defaults.fontSizeDots.toDouble(),
+        ).toFloat()
+        val fontSize = if (
+            json.optInt("fontSizeVersion", 1) < PERSON_BLOCK_FONT_SIZE_VERSION &&
+            savedFontSize <= LEGACY_SMALL_PERSON_FONT_MAX_DOTS
+        ) {
+            defaults.fontSizeDots
+        } else {
+            savedFontSize
+        }
+        return defaults.copy(
+            enabled = json.optBoolean("enabled", defaults.enabled),
+            persons = personsFromJson(json.optJSONArray("persons"), defaults.persons),
+            layout = enumOrDefault(json.optString("layout"), defaults.layout),
+            placementMode = enumOrDefault(
+                json.optString("placementMode"),
+                PersonPlacementMode.SIDE_OVERLAY,
+            ),
+            personInsertIndex = json.optInt(
+                "personInsertIndex",
+                json.optInt("insertIndex", defaults.personInsertIndex),
+            ).coerceAtLeast(0),
+            positionXNorm = json.optDouble(
+                "positionXNorm",
+                defaults.positionXNorm.toDouble(),
+            ).toFloat(),
+            positionYNorm = json.optDouble(
+                "positionYNorm",
+                defaults.positionYNorm.toDouble(),
+            ).toFloat(),
+            offsetXMm = json.optDouble("offsetXMm", defaults.offsetXMm.toDouble()).toFloat(),
+            offsetYMm = json.optDouble("offsetYMm", defaults.offsetYMm.toDouble()).toFloat(),
+            columnGapMm = json.optDouble(
+                "columnGapMm",
+                defaults.columnGapMm.toDouble(),
+            ).toFloat(),
+            fontId = json.optString("fontId", defaults.fontId),
+            fontSizeDots = fontSize,
+            characterSpacingDots = json.optDouble(
+                "characterSpacingDots",
+                defaults.characterSpacingDots.toDouble(),
+            ).toFloat(),
+        )
+    }
+
+    private fun legacyPersonBlockFromFooterJson(json: JSONObject): PersonBlockSettings {
+        val defaults = PersonBlockSettings()
+        val persons = personsFromJson(json.optJSONArray("persons"), defaults.persons)
+        val legacyFontSize = json.optDouble(
+            "personFontSizeDots",
+            defaults.fontSizeDots.toDouble(),
+        ).toFloat()
+        return defaults.copy(
+            enabled = json.optBoolean("personsEnabled", persons.isNotEmpty()),
+            persons = persons,
+            layout = enumOrDefault(json.optString("personLayout"), defaults.layout),
+            placementMode = PersonPlacementMode.SIDE_OVERLAY,
+            columnGapMm = json.optDouble(
+                "personColumnGapMm",
+                defaults.columnGapMm.toDouble(),
+            ).toFloat(),
+            fontId = json.optString("personFontId", defaults.fontId),
+            fontSizeDots = legacyFontSize.coerceAtLeast(defaults.fontSizeDots),
+        )
+    }
+
+    private fun personsToJson(persons: List<FooterPerson>): JSONArray = JSONArray().apply {
+        persons.forEach { person ->
+            put(JSONObject().apply {
+                put("id", person.id)
+                put("relation", person.relation)
+                put("name", person.name)
+            })
+        }
+    }
+
+    private fun personsFromJson(
+        array: JSONArray?,
+        defaults: List<FooterPerson>,
+    ): List<FooterPerson> {
+        if (array == null) return defaults
+        return buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                add(
+                    FooterPerson(
+                        relation = item.optString("relation"),
+                        name = item.optString("name"),
+                        id = item.optString("id").ifBlank { "legacy-person-$index" },
+                    ),
+                )
+            }
+        }
     }
 
     private fun flowerToJson(settings: FlowerSettings): JSONObject = JSONObject().apply {
@@ -475,6 +543,8 @@ class TemplateRepository(context: Context) {
     }
 
     companion object {
+        private const val PERSON_BLOCK_FONT_SIZE_VERSION = 2
+        private const val LEGACY_SMALL_PERSON_FONT_MAX_DOTS = 48f
         private val TEMPLATES_JSON = stringPreferencesKey("templates_json")
         private val LAST_DEVICE_JSON = stringPreferencesKey("last_device_json")
         private val AUTO_RECONNECT = booleanPreferencesKey("auto_reconnect")

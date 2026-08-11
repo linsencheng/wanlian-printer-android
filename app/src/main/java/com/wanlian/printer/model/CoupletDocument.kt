@@ -51,16 +51,22 @@ data class CoupletPairDocument(
                 bottomMarginMm = source.footerLabel.bottomMarginMm,
                 position = source.footerLabel.position,
                 orientation = source.footerLabel.orientation,
-                personLayout = source.footerLabel.personLayout,
-                personColumnGapMm = source.footerLabel.personColumnGapMm,
-                personGroupOffsetXMm = source.footerLabel.personGroupOffsetXMm,
-                personGroupOffsetYMm = source.footerLabel.personGroupOffsetYMm,
-                personFontId = source.footerLabel.personFontId,
-                personFontSizeDots = source.footerLabel.personFontSizeDots,
                 flower = source.footerLabel.flower,
             )
         } else {
             target.footerLabel
+        }
+        val sharedPersonBlock = if (sharedFooterLayout) {
+            target.personBlock.copy(
+                layout = source.personBlock.layout,
+                placementMode = source.personBlock.placementMode,
+                columnGapMm = source.personBlock.columnGapMm,
+                fontId = source.personBlock.fontId,
+                fontSizeDots = source.personBlock.fontSizeDots,
+                characterSpacingDots = source.personBlock.characterSpacingDots,
+            )
+        } else {
+            target.personBlock
         }
         return target.copy(
             paperWidthMm = source.paperWidthMm,
@@ -70,6 +76,7 @@ data class CoupletPairDocument(
             topMarginMm = source.topMarginMm,
             bottomMarginMm = source.bottomMarginMm,
             border = if (sharedBorderSettings) source.border else target.border,
+            personBlock = sharedPersonBlock,
             footerLabel = sharedFooter,
             cutGuide = if (sharedFooterLayout) source.cutGuide else target.cutGuide,
             density = source.density,

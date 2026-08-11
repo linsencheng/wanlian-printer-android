@@ -68,23 +68,6 @@ object PrintLayoutRules {
             settings.fontSizeDots.coerceAtLeast(8f) * textUnits +
                 settings.spacingDots.coerceAtLeast(0f) * (textUnits - 1).coerceAtLeast(0)
         }
-        val persons = settings.persons.take(PersonLayoutRules.MAX_PERSONS)
-            .filter { it.verticalText.isNotBlank() }
-        val personUnits = when {
-            persons.isEmpty() -> 0
-            settings.personLayout == PersonLayout.SEQUENTIAL -> persons.sumOf {
-                codePointCount(it.verticalText)
-            }
-            else -> persons.maxOf { codePointCount(it.verticalText) }
-        }
-        val personHeightDots = if (personUnits == 0) 0f else {
-            settings.personFontSizeDots.coerceIn(
-                PersonLayoutRules.MIN_FONT_SIZE_DOTS,
-                PersonLayoutRules.MAX_FONT_SIZE_DOTS,
-            ) * personUnits + settings.spacingDots.coerceAtLeast(0f) *
-                (personUnits - 1).coerceAtLeast(0)
-        }
-        val personTopGapMm = if (hasBodyText && persons.isNotEmpty()) 3f else 0f
         val flowerReserveMm = if (
             settings.flower.enabled && settings.flower.style != FlowerStyle.NONE
         ) {
@@ -100,9 +83,6 @@ object PrintLayoutRules {
         }
         return settings.distanceFromMainMm.coerceAtLeast(0f) +
             PrintUnits.dotsToMm(textHeightDots.toInt()) +
-            personTopGapMm +
-            settings.personGroupOffsetYMm.coerceAtLeast(0f) +
-            PrintUnits.dotsToMm(personHeightDots.toInt()) +
             flowerReserveMm +
             settings.bottomMarginMm.coerceAtLeast(0f)
     }

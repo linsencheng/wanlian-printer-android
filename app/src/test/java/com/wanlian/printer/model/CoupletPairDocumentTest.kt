@@ -53,31 +53,45 @@ class CoupletPairDocumentTest {
         val leftPeople = listOf(FooterPerson("媳", "黄秋"), FooterPerson("儿", "夏凡"))
         val rightPeople = listOf(FooterPerson("女", "夏丽君"))
         val original = CoupletPairDocument.fromSingle(
-            PrintSettings(footerLabel = FooterLabelSettings(persons = leftPeople)),
+            PrintSettings(
+                personBlock = PersonBlockSettings(
+                    persons = leftPeople,
+                    personInsertIndex = 4,
+                    offsetXMm = -3f,
+                ),
+            ),
         ).copy(
-            right = PrintSettings(footerLabel = FooterLabelSettings(persons = rightPeople)),
+            right = PrintSettings(
+                personBlock = PersonBlockSettings(
+                    persons = rightPeople,
+                    personInsertIndex = 7,
+                    offsetXMm = 8f,
+                ),
+            ),
         )
         val updated = original.replaceSelected(
             original.left.copy(
-                footerLabel = original.left.footerLabel.copy(
-                    personLayout = PersonLayout.PARALLEL_COLUMNS,
-                    personColumnGapMm = 9f,
-                    personGroupOffsetXMm = -3f,
-                    personGroupOffsetYMm = 7f,
-                    personFontId = "hei",
-                    personFontSizeDots = 42f,
+                personBlock = original.left.personBlock.copy(
+                    layout = PersonLayout.PARALLEL_COLUMNS,
+                    placementMode = PersonPlacementMode.INLINE_INSERT,
+                    columnGapMm = 9f,
+                    fontId = "hei",
+                    fontSizeDots = 42f,
                 ),
             ),
         )
 
-        assertEquals(PersonLayout.PARALLEL_COLUMNS, updated.right.footerLabel.personLayout)
-        assertEquals(9f, updated.right.footerLabel.personColumnGapMm, 0.001f)
-        assertEquals(-3f, updated.right.footerLabel.personGroupOffsetXMm, 0.001f)
-        assertEquals(7f, updated.right.footerLabel.personGroupOffsetYMm, 0.001f)
-        assertEquals("hei", updated.right.footerLabel.personFontId)
-        assertEquals(42f, updated.right.footerLabel.personFontSizeDots, 0.001f)
-        assertEquals(leftPeople, updated.left.footerLabel.persons)
-        assertEquals(rightPeople, updated.right.footerLabel.persons)
+        assertEquals(PersonLayout.PARALLEL_COLUMNS, updated.right.personBlock.layout)
+        assertEquals(PersonPlacementMode.INLINE_INSERT, updated.right.personBlock.placementMode)
+        assertEquals(9f, updated.right.personBlock.columnGapMm, 0.001f)
+        assertEquals("hei", updated.right.personBlock.fontId)
+        assertEquals(42f, updated.right.personBlock.fontSizeDots, 0.001f)
+        assertEquals(leftPeople, updated.left.personBlock.persons)
+        assertEquals(rightPeople, updated.right.personBlock.persons)
+        assertEquals(4, updated.left.personBlock.personInsertIndex)
+        assertEquals(7, updated.right.personBlock.personInsertIndex)
+        assertEquals(-3f, updated.left.personBlock.offsetXMm, 0.001f)
+        assertEquals(8f, updated.right.personBlock.offsetXMm, 0.001f)
     }
 
     @Test

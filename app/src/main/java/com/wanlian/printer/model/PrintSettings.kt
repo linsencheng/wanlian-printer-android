@@ -20,6 +20,7 @@ data class PrintSettings(
     val textAlignment: TextHorizontalAlignment = TextHorizontalAlignment.CENTER,
     val textWeight: TextWeight = TextWeight.BOLD,
     val border: BorderSettings = BorderSettings(),
+    val personBlock: PersonBlockSettings = PersonBlockSettings(),
     val footerLabel: FooterLabelSettings = FooterLabelSettings(),
     val cutGuide: CutGuideSettings = CutGuideSettings(),
     val printDirection: PrintDirection = PrintDirection.FORWARD,

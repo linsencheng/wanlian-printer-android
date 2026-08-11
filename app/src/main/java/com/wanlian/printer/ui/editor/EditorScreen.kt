@@ -201,6 +201,13 @@ fun EditorScreen(
                         pairRendered = state.pairPreview,
                         selectedSide = state.pairDocument?.selectedSide ?: CoupletSide.LEFT,
                         onSideSelected = onSelectCoupletSide,
+                        onPersonBlockMove = { deltaXMm, deltaYMm ->
+                            onSettingsChange { current ->
+                                current.copy(
+                                    personBlock = current.personBlock.movedBy(deltaXMm, deltaYMm),
+                                )
+                            }
+                        },
                         modifier = Modifier.weight(0.65f).fillMaxSize(),
                     )
                     EditorToolPanel(
@@ -460,6 +467,13 @@ private fun PhoneEditorWorkspace(
                 pairRendered = state.pairPreview,
                 selectedSide = state.pairDocument?.selectedSide ?: CoupletSide.LEFT,
                 onSideSelected = onSelectCoupletSide,
+                onPersonBlockMove = { deltaXMm, deltaYMm ->
+                    onSettingsChange { current ->
+                        current.copy(
+                            personBlock = current.personBlock.movedBy(deltaXMm, deltaYMm),
+                        )
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(if (focusPreview) 1f else 1f - panelFraction),
