@@ -25,19 +25,40 @@ object FooterLabelAdjustmentLimits {
     )
 }
 
-object FooterLabelPositionRules {
-    fun resolveTopDots(
-        baseTopDots: Float,
-        offsetYMm: Float,
+data class FooterBlockLayout(
+    val topDots: Float,
+    val bottomDots: Float,
+    val minimumTopDots: Float,
+    val maximumTopDots: Float,
+)
+
+object FooterBlockLayoutEngine {
+    fun layout(
+        mainContentBottomDots: Float,
+        paperHeightDots: Float,
         blockHeightDots: Float,
-        safeTopDots: Float,
-        safeBottomDots: Float,
-    ): Float {
-        val requestedTop = baseTopDots + PrintUnits.mmToDots(
+        distanceFromMainMm: Float,
+        distanceFromPageEndMm: Float,
+        offsetYMm: Float,
+        pageBottomSafetyDots: Float,
+    ): FooterBlockLayout {
+        val minimumTop = mainContentBottomDots + PrintUnits.mmToDots(
+            distanceFromMainMm.coerceAtLeast(0f),
+        )
+        val safeBottom = (paperHeightDots - pageBottomSafetyDots).coerceAtLeast(minimumTop)
+        val maximumTop = (safeBottom - blockHeightDots).coerceAtLeast(minimumTop)
+        val anchoredTop = paperHeightDots - pageBottomSafetyDots -
+            PrintUnits.mmToDots(distanceFromPageEndMm.coerceAtLeast(0f)) - blockHeightDots
+        val requestedTop = anchoredTop + PrintUnits.mmToDots(
             FooterLabelAdjustmentLimits.clampOffsetYMm(offsetYMm),
         )
-        val maximumTop = (safeBottomDots - blockHeightDots).coerceAtLeast(safeTopDots)
-        return requestedTop.coerceIn(safeTopDots, maximumTop)
+        val top = requestedTop.coerceIn(minimumTop, maximumTop)
+        return FooterBlockLayout(
+            topDots = top,
+            bottomDots = top + blockHeightDots,
+            minimumTopDots = minimumTop,
+            maximumTopDots = maximumTop,
+        )
     }
 }
 
