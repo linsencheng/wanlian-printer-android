@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build-ios:
-    name: xcodebuild, ad-hoc sign, and IPA
+    name: xcodebuild, A/B packaging test, and diagnostics
     runs-on: macos-15
     timeout-minutes: 20
 
@@ -56,13 +56,84 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             clean build | tee xcodebuild-ios.log
 
-      - name: Ad-hoc sign and verify app
+      - name: Inspect built app bundle
         shell: bash
         run: |
           set -euo pipefail
           set -o pipefail
           APP_PATH="$RUNNER_TEMP/WanLianDerivedData/Build/Products/Release-iphoneos/WanLianPrint.app"
+          EXECUTABLE_PATH="$APP_PATH/WanLianPrint"
           test -d "$APP_PATH"
+          test -f "$EXECUTABLE_PATH"
+
+          {
+            echo "== full file listing with sizes =="
+            find "$APP_PATH" -type f -exec ls -la {} \;
+            echo
+            echo "== total bundle size =="
+            du -sh "$APP_PATH"
+            echo
+            echo "== Assets.car present? =="
+            if [ -f "$APP_PATH/Assets.car" ]; then
+              echo "Assets.car FOUND, size: $(stat -f%z "$APP_PATH/Assets.car") bytes"
+            else
+              echo "Assets.car MISSING"
+            fi
+            echo
+            echo "== unsigned state =="
+            if otool -l "$EXECUTABLE_PATH" | grep -q LC_CODE_SIGNATURE; then
+              echo "Unexpected LC_CODE_SIGNATURE in unsigned build"
+              exit 1
+            else
+              echo "LC_CODE_SIGNATURE absent as expected"
+            fi
+            if [ -e "$APP_PATH/_CodeSignature" ]; then
+              echo "Unexpected _CodeSignature in unsigned build"
+              exit 1
+            else
+              echo "_CodeSignature absent as expected"
+            fi
+          } | tee bundle-inspect.txt
+
+          plutil -convert xml1 -o Info-plist-dump.xml "$APP_PATH/Info.plist"
+          echo "== Info.plist as XML ==" | tee -a bundle-inspect.txt
+          tee -a bundle-inspect.txt < Info-plist-dump.xml > /dev/null
+
+          echo "== Icon and bundle identity keys ==" | tee -a bundle-inspect.txt
+          /usr/libexec/PlistBuddy -c "Print" "$APP_PATH/Info.plist" 2>&1 \
+            | grep -iE "icon|bundleversion|bundleshortversion|minimumos|bundleidentifier|bundleexecutable|bundlename" \
+            | tee -a bundle-inspect.txt || true
+
+      - name: Package variant A (fully unsigned, clean ditto)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export COPYFILE_DISABLE=1
+          APP_PATH="$RUNNER_TEMP/WanLianDerivedData/Build/Products/Release-iphoneos/WanLianPrint.app"
+          test -d "$APP_PATH"
+          PACKAGE_ROOT="$RUNNER_TEMP/WanLianUnsignedPackage"
+          rm -rf "$PACKAGE_ROOT"
+          mkdir -p "$PACKAGE_ROOT/Payload"
+
+          ditto --norsrc --noextattr "$APP_PATH" "$PACKAGE_ROOT/Payload/WanLianPrint.app"
+
+          cd "$PACKAGE_ROOT"
+          ditto -c -k --norsrc --noextattr --keepParent \
+            Payload \
+            "$GITHUB_WORKSPACE/WanLianPrint-A-unsigned.ipa"
+
+      - name: Ad-hoc sign a separate copy for variant B
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          export COPYFILE_DISABLE=1
+          SRC_APP="$RUNNER_TEMP/WanLianDerivedData/Build/Products/Release-iphoneos/WanLianPrint.app"
+          SIGNED_ROOT="$RUNNER_TEMP/WanLianSignedApp"
+          rm -rf "$SIGNED_ROOT"
+          mkdir -p "$SIGNED_ROOT"
+          APP_PATH="$SIGNED_ROOT/WanLianPrint.app"
+          ditto --norsrc --noextattr "$SRC_APP" "$APP_PATH"
 
           codesign \
             --force \
@@ -85,52 +156,74 @@ jobs:
             | grep -A4 LC_CODE_SIGNATURE \
             | tee "$GITHUB_WORKSPACE/lc-code-signature.txt"
 
-      - name: Package ad-hoc signed IPA
+      - name: Package variant B (ad-hoc signed, clean ditto)
         shell: bash
         run: |
           set -euo pipefail
-          APP_PATH="$RUNNER_TEMP/WanLianDerivedData/Build/Products/Release-iphoneos/WanLianPrint.app"
+          export COPYFILE_DISABLE=1
+          APP_PATH="$RUNNER_TEMP/WanLianSignedApp/WanLianPrint.app"
           test -d "$APP_PATH"
           PACKAGE_ROOT="$RUNNER_TEMP/WanLianAdhocPackage"
           rm -rf "$PACKAGE_ROOT"
           mkdir -p "$PACKAGE_ROOT/Payload"
 
-          ditto "$APP_PATH" "$PACKAGE_ROOT/Payload/WanLianPrint.app"
+          ditto --norsrc --noextattr "$APP_PATH" "$PACKAGE_ROOT/Payload/WanLianPrint.app"
 
           cd "$PACKAGE_ROOT"
-          ditto \
-            -c \
-            -k \
-            --sequesterRsrc \
-            --keepParent \
+          ditto -c -k --norsrc --noextattr --keepParent \
             Payload \
-            "$GITHUB_WORKSPACE/WanLianPrint-adhoc.ipa"
+            "$GITHUB_WORKSPACE/WanLianPrint-B-adhoc.ipa"
 
-      - name: Verify IPA contents
+      - name: Verify both IPA contents
         shell: bash
         run: |
           set -euo pipefail
           set -o pipefail
-          unzip -l WanLianPrint-adhoc.ipa | tee ipa-contents.txt
+          : > ipa-contents.txt
+          : > zip-metadata.txt
+          : > WanLianPrint-checksums.sha256
 
-          grep -Fq "Payload/WanLianPrint.app/Info.plist" ipa-contents.txt
-          grep -Fq "Payload/WanLianPrint.app/WanLianPrint" ipa-contents.txt
-          grep -Fq "Payload/WanLianPrint.app/_CodeSignature/CodeResources" ipa-contents.txt
+          for ipa in WanLianPrint-A-unsigned.ipa WanLianPrint-B-adhoc.ipa; do
+            echo "== $ipa ==" | tee -a ipa-contents.txt
+            unzip -l "$ipa" | tee -a ipa-contents.txt
+            unzip -Z1 "$ipa" > "$RUNNER_TEMP/ipa-listing.txt"
+            grep -Fq "Payload/WanLianPrint.app/Info.plist" "$RUNNER_TEMP/ipa-listing.txt"
+            grep -Fq "Payload/WanLianPrint.app/WanLianPrint" "$RUNNER_TEMP/ipa-listing.txt"
 
-          shasum -a 256 WanLianPrint-adhoc.ipa | tee WanLianPrint-adhoc.sha256
+            if grep -Eq '(^|/)__MACOSX(/|$)|(^|/)\._' "$RUNNER_TEMP/ipa-listing.txt"; then
+              echo "Unexpected AppleDouble metadata in $ipa" >&2
+              exit 1
+            fi
 
-      - name: Upload ad-hoc IPA and build diagnostics
+            if [ "$ipa" = "WanLianPrint-A-unsigned.ipa" ]; then
+              if grep -Fq "Payload/WanLianPrint.app/_CodeSignature/CodeResources" "$RUNNER_TEMP/ipa-listing.txt"; then
+                echo "Variant A unexpectedly contains CodeResources" >&2
+                exit 1
+              fi
+            else
+              grep -Fq "Payload/WanLianPrint.app/_CodeSignature/CodeResources" "$RUNNER_TEMP/ipa-listing.txt"
+            fi
+
+            echo "== $ipa ==" | tee -a zip-metadata.txt
+            zipinfo -v "$ipa" | tee -a zip-metadata.txt > /dev/null
+            shasum -a 256 "$ipa" | tee -a WanLianPrint-checksums.sha256
+          done
+
+      - name: Upload A/B IPAs and diagnostics
         uses: actions/upload-artifact@v4
         with:
-          name: WanLianPrint-iOS-adhoc
+          name: WanLianPrint-iOS-AB-test
           if-no-files-found: error
           retention-days: 30
           path: |
-            WanLianPrint-adhoc.ipa
-            ${{ runner.temp }}/WanLianDerivedData/Build/Products/Release-iphoneos/WanLianPrint.app
+            WanLianPrint-A-unsigned.ipa
+            WanLianPrint-B-adhoc.ipa
+            WanLianPrint-checksums.sha256
+            bundle-inspect.txt
+            Info-plist-dump.xml
             codesign-info.txt
             lc-code-signature.txt
             ipa-contents.txt
-            WanLianPrint-adhoc.sha256
+            zip-metadata.txt
             ios-toolchain.txt
             xcodebuild-ios.log
