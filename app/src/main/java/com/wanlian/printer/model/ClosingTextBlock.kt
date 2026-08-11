@@ -6,6 +6,8 @@ package com.wanlian.printer.model
  */
 data class ClosingTextBlockSettings(
     val offsetYMm: Float = 0f,
+    /** Per-character vertical corrections created by pair-tail alignment. */
+    val characterOffsetDots: List<Float> = emptyList(),
 )
 
 data class ClosingTextMatch(
@@ -14,7 +16,8 @@ data class ClosingTextMatch(
 )
 
 data class ClosingTextBlockAlignmentGeometry(
-    val zeroOffsetCenterYDots: Float,
+    /** Center of the first recognised tail character before the block offset is applied. */
+    val zeroOffsetFirstCharacterCenterYDots: Float,
     val minimumOffsetDots: Float,
     val maximumOffsetDots: Float,
 )
@@ -95,11 +98,28 @@ object ClosingTextBlockRules {
 
     fun alignmentOffsetDots(
         geometry: ClosingTextBlockAlignmentGeometry,
-        anchorCenterYDots: Float,
-    ): Float = (anchorCenterYDots - geometry.zeroOffsetCenterYDots).coerceIn(
+        anchorFirstCharacterCenterYDots: Float,
+    ): Float = (anchorFirstCharacterCenterYDots - geometry.zeroOffsetFirstCharacterCenterYDots).coerceIn(
         geometry.minimumOffsetDots,
         geometry.maximumOffsetDots,
     )
+
+    /**
+     * Produces the independent corrections needed after the first tail character has been
+     * translated as a block. A zero in the first position keeps that character as the anchor.
+     */
+    fun characterOffsetsForAlignment(
+        movingZeroOffsetCenters: List<Float>,
+        anchorCenters: List<Float>,
+    ): List<Float>? {
+        if (movingZeroOffsetCenters.isEmpty() || movingZeroOffsetCenters.size != anchorCenters.size) {
+            return null
+        }
+        val blockOffset = anchorCenters.first() - movingZeroOffsetCenters.first()
+        return movingZeroOffsetCenters.indices.map { index ->
+            anchorCenters[index] - movingZeroOffsetCenters[index] - blockOffset
+        }
+    }
 
     fun safeOffsetBounds(
         blockTopDots: Float,

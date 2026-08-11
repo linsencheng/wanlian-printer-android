@@ -262,12 +262,17 @@ class TemplateRepository(context: Context) {
     private fun closingTextBlockToJson(settings: ClosingTextBlockSettings): JSONObject =
         JSONObject().apply {
             put("offsetYMm", settings.offsetYMm)
+            put("characterOffsetDots", JSONArray(settings.characterOffsetDots))
         }
 
     private fun closingTextBlockFromJson(json: JSONObject): ClosingTextBlockSettings {
         val defaults = ClosingTextBlockSettings()
+        val characterOffsets = json.optJSONArray("characterOffsetDots")?.let { offsets ->
+            List(offsets.length()) { index -> offsets.optDouble(index, 0.0).toFloat() }
+        } ?: defaults.characterOffsetDots
         return defaults.copy(
             offsetYMm = json.optDouble("offsetYMm", defaults.offsetYMm.toDouble()).toFloat(),
+            characterOffsetDots = characterOffsets,
         )
     }
 

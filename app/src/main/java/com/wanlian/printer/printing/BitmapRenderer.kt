@@ -50,8 +50,14 @@ data class ClosingTextBlockBounds(
     val topDots: Float,
     val bottomDots: Float,
     val centerYDots: Float,
+    val characterBounds: List<ClosingTextBlockCharacterBounds>,
     val alignmentGeometry: ClosingTextBlockAlignmentGeometry,
     val resolvedOffsetDots: Float,
+)
+
+data class ClosingTextBlockCharacterBounds(
+    val zeroOffsetCenterYDots: Float,
+    val centerYDots: Float,
 )
 
 data class RenderedCoupletPair(
@@ -264,12 +270,21 @@ class BitmapRenderer(
                 settings.personBlock.placementMode == PersonPlacementMode.SIDE_OVERLAY,
             closingTextBlockBounds = textPlacement.closingBlockTopDots?.let { topDots ->
                 val bottomDots = requireNotNull(textPlacement.closingBlockBottomDots)
+                val characterBounds = textPlacement.closingCharacterBounds.map { character ->
+                    ClosingTextBlockCharacterBounds(
+                        zeroOffsetCenterYDots = (character.topDots + character.bottomDots) / 2f,
+                        centerYDots = (character.topDots + character.bottomDots) / 2f +
+                            textPlacement.closingOffsetDots,
+                    )
+                }
                 ClosingTextBlockBounds(
                     topDots = topDots + textPlacement.closingOffsetDots,
                     bottomDots = bottomDots + textPlacement.closingOffsetDots,
                     centerYDots = (topDots + bottomDots) / 2f + textPlacement.closingOffsetDots,
+                    characterBounds = characterBounds,
                     alignmentGeometry = ClosingTextBlockAlignmentGeometry(
-                        zeroOffsetCenterYDots = (topDots + bottomDots) / 2f,
+                        zeroOffsetFirstCharacterCenterYDots =
+                            requireNotNull(characterBounds.firstOrNull()).zeroOffsetCenterYDots,
                         minimumOffsetDots = textPlacement.minimumClosingOffsetDots,
                         maximumOffsetDots = textPlacement.maximumClosingOffsetDots,
                     ),
@@ -472,7 +487,8 @@ class BitmapRenderer(
                 val closingShift = if (
                     characterIndex in placement.closingCharacterIndexes[columnIndex]
                 ) {
-                    placement.closingOffsetDots
+                    placement.closingOffsetDots +
+                        placement.closingCharacterOffsets[columnIndex][characterIndex].orZero()
                 } else {
                     0f
                 }
@@ -496,19 +512,24 @@ class BitmapRenderer(
         val closingIndexes = columns.map { characters ->
             ClosingTextBlockRules.matchColumn(characters)?.characterIndexes ?: emptySet()
         }
-        val closingBlockTop = columns.indices.minOfOrNull { columnIndex ->
-            closingIndexes[columnIndex].minOfOrNull { characterIndex ->
-                topDots + characterIndex * layout.characterAdvanceDots +
-                    flowShiftDots(characterIndex, inlineInsertIndex, inlineShiftDots)
-            } ?: Float.POSITIVE_INFINITY
-        }?.takeIf(Float::isFinite)
-        val closingBlockBottom = columns.indices.maxOfOrNull { columnIndex ->
-            closingIndexes[columnIndex].maxOfOrNull { characterIndex ->
-                topDots + characterIndex * layout.characterAdvanceDots +
+        val closingCharacterOffsets = closingIndexes.map { characterIndexes ->
+            characterIndexes.sorted().mapIndexed { rank, characterIndex ->
+                characterIndex to settings.closingTextBlock.characterOffsetDots.getOrNull(rank).orZero()
+            }.toMap()
+        }
+        val closingCharacterBounds = columns.flatMapIndexed { columnIndex, _ ->
+            closingIndexes[columnIndex].sorted().map { characterIndex ->
+                val top = topDots + characterIndex * layout.characterAdvanceDots +
                     flowShiftDots(characterIndex, inlineInsertIndex, inlineShiftDots) +
-                    layout.glyphHeightDots
-            } ?: Float.NEGATIVE_INFINITY
-        }?.takeIf(Float::isFinite)
+                    closingCharacterOffsets[columnIndex][characterIndex].orZero()
+                ClosingCharacterPlacement(
+                    topDots = top,
+                    bottomDots = top + layout.glyphHeightDots,
+                )
+            }
+        }.sortedBy(ClosingCharacterPlacement::topDots)
+        val closingBlockTop = closingCharacterBounds.minOfOrNull(ClosingCharacterPlacement::topDots)
+        val closingBlockBottom = closingCharacterBounds.maxOfOrNull(ClosingCharacterPlacement::bottomDots)
         val requestedClosingOffset = PrintUnits.mmToDots(
             ClosingTextBlockRules.clampOffsetYMm(settings.closingTextBlock.offsetYMm),
         ).toFloat()
@@ -529,7 +550,8 @@ class BitmapRenderer(
                 if (characters[characterIndex].isBlank()) continue
                 val flowShift = flowShiftDots(characterIndex, inlineInsertIndex, inlineShiftDots)
                 val closingShift = if (characterIndex in closingIndexes[columnIndex]) {
-                    resolvedClosingOffset
+                    resolvedClosingOffset +
+                        closingCharacterOffsets[columnIndex][characterIndex].orZero()
                 } else {
                     0f
                 }
@@ -542,10 +564,12 @@ class BitmapRenderer(
         }
         return VerticalTextPlacement(
             closingCharacterIndexes = closingIndexes,
+            closingCharacterOffsets = closingCharacterOffsets,
             closingOffsetDots = resolvedClosingOffset,
             contentBottomDots = contentBottom,
             closingBlockTopDots = closingBlockTop,
             closingBlockBottomDots = closingBlockBottom,
+            closingCharacterBounds = closingCharacterBounds,
             minimumClosingOffsetDots = if (closingBlockTop != null && closingBlockBottom != null) {
                 ClosingTextBlockRules.safeOffsetBounds(
                     blockTopDots = closingBlockTop,
@@ -578,6 +602,8 @@ class BitmapRenderer(
     } else {
         0f
     }
+
+    private fun Float?.orZero(): Float = this ?: 0f
 
     private fun drawBorders(
         surfaces: RenderSurfaces,
@@ -715,12 +741,19 @@ class BitmapRenderer(
 
     private data class VerticalTextPlacement(
         val closingCharacterIndexes: List<Set<Int>>,
+        val closingCharacterOffsets: List<Map<Int, Float>>,
         val closingOffsetDots: Float,
         val contentBottomDots: Float,
         val closingBlockTopDots: Float? = null,
         val closingBlockBottomDots: Float? = null,
+        val closingCharacterBounds: List<ClosingCharacterPlacement> = emptyList(),
         val minimumClosingOffsetDots: Float = 0f,
         val maximumClosingOffsetDots: Float = 0f,
+    )
+
+    private data class ClosingCharacterPlacement(
+        val topDots: Float,
+        val bottomDots: Float,
     )
 
     private data class BorderGeometry(

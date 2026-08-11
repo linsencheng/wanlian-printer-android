@@ -73,33 +73,46 @@ class ClosingTextBlockRulesTest {
     }
 
     @Test
-    fun `pair alignment solves the moving block offset from real block centers`() {
+    fun `pair alignment solves the moving block offset from the first tail character`() {
         val geometry = ClosingTextBlockAlignmentGeometry(
-            zeroOffsetCenterYDots = 140f,
+            zeroOffsetFirstCharacterCenterYDots = 140f,
             minimumOffsetDots = -30f,
             maximumOffsetDots = 80f,
         )
 
         val offset = ClosingTextBlockRules.alignmentOffsetDots(
             geometry = geometry,
-            anchorCenterYDots = 185f,
+            anchorFirstCharacterCenterYDots = 185f,
         )
 
         assertEquals(45f, offset, 0.001f)
-        assertEquals(185f, geometry.zeroOffsetCenterYDots + offset, 0.001f)
+        assertEquals(185f, geometry.zeroOffsetFirstCharacterCenterYDots + offset, 0.001f)
     }
 
     @Test
     fun `pair alignment clamps moving block inside its own safe area`() {
         val offset = ClosingTextBlockRules.alignmentOffsetDots(
             geometry = ClosingTextBlockAlignmentGeometry(
-                zeroOffsetCenterYDots = 140f,
+                zeroOffsetFirstCharacterCenterYDots = 140f,
                 minimumOffsetDots = -30f,
                 maximumOffsetDots = 80f,
             ),
-            anchorCenterYDots = 260f,
+            anchorFirstCharacterCenterYDots = 260f,
         )
 
         assertEquals(80f, offset, 0.001f)
+    }
+
+    @Test
+    fun `pair alignment corrects each tail character after anchoring the first one`() {
+        val offsets = ClosingTextBlockRules.characterOffsetsForAlignment(
+            movingZeroOffsetCenters = listOf(100f, 160f),
+            anchorCenters = listOf(200f, 280f),
+        )
+
+        assertEquals(listOf(0f, 20f), offsets)
+        val blockOffset = 100f
+        assertEquals(200f, 100f + blockOffset + requireNotNull(offsets)[0], 0.001f)
+        assertEquals(280f, 160f + blockOffset + requireNotNull(offsets)[1], 0.001f)
     }
 }

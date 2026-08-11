@@ -46,6 +46,12 @@ private data class EditorHistoryState(
     val pairDocument: CoupletPairDocument?,
 )
 
+private data class ClosingBlockPairAlignment(
+    val requestedOffsetDots: Float,
+    val clampedOffsetDots: Float,
+    val characterOffsetDots: List<Float>,
+)
+
 data class MainUiState(
     val settings: PrintSettings = PrintSettings(),
     val documentMode: DocumentMode = DocumentMode.SINGLE,
@@ -239,18 +245,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val result = withContext(Dispatchers.Default) {
                 val pairLength = bitmapRenderer.resolvePairPaperLengthMm(pair)
-                val leftBounds = bitmapRenderer.measureClosingTextBlockBounds(pair.left, pairLength)
                 val rightBounds = bitmapRenderer.measureClosingTextBlockBounds(pair.right, pairLength)
-                if (leftBounds == null || rightBounds == null) {
+                val leftBase = pair.left.copy(
+                    closingTextBlock = pair.left.closingTextBlock.copy(
+                        offsetYMm = 0f,
+                        characterOffsetDots = emptyList(),
+                    ),
+                )
+                val leftBaseBounds = bitmapRenderer.measureClosingTextBlockBounds(leftBase, pairLength)
+                val characterOffsetDots = if (leftBaseBounds == null || rightBounds == null) {
                     null
                 } else {
-                    val requestedOffsetDots = rightBounds.centerYDots -
-                        leftBounds.alignmentGeometry.zeroOffsetCenterYDots
-                    val clampedOffsetDots = ClosingTextBlockRules.alignmentOffsetDots(
-                        geometry = leftBounds.alignmentGeometry,
-                        anchorCenterYDots = rightBounds.centerYDots,
+                    ClosingTextBlockRules.characterOffsetsForAlignment(
+                        movingZeroOffsetCenters = leftBaseBounds.characterBounds.map {
+                            it.zeroOffsetCenterYDots
+                        },
+                        anchorCenters = rightBounds.characterBounds.map { it.centerYDots },
                     )
-                    pair to Triple(requestedOffsetDots, clampedOffsetDots, rightBounds.centerYDots)
+                }
+                if (rightBounds == null || characterOffsetDots == null) {
+                    null
+                } else {
+                    val adjustedLeft = leftBase.copy(
+                        closingTextBlock = leftBase.closingTextBlock.copy(
+                            characterOffsetDots = characterOffsetDots,
+                        ),
+                    )
+                    val adjustedLeftBounds = bitmapRenderer.measureClosingTextBlockBounds(
+                        adjustedLeft,
+                        pairLength,
+                    ) ?: return@withContext null
+                    val requestedOffsetDots = rightBounds.characterBounds.first().centerYDots -
+                        adjustedLeftBounds.alignmentGeometry.zeroOffsetFirstCharacterCenterYDots
+                    val clampedOffsetDots = ClosingTextBlockRules.alignmentOffsetDots(
+                        geometry = adjustedLeftBounds.alignmentGeometry,
+                        anchorFirstCharacterCenterYDots = rightBounds.characterBounds.first().centerYDots,
+                    )
+                    pair to ClosingBlockPairAlignment(
+                        requestedOffsetDots = requestedOffsetDots,
+                        clampedOffsetDots = clampedOffsetDots,
+                        characterOffsetDots = characterOffsetDots,
+                    )
                 }
             }
             if (result == null) {
@@ -264,12 +299,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ) {
                 return@launch
             }
-            val (_, clampedOffsetDots, _) = alignment
-            val alignedOffsetYMm = PrintUnits.dotsToMm(clampedOffsetDots.roundToInt())
+            val alignedOffsetYMm = PrintUnits.dotsToMm(alignment.clampedOffsetDots.roundToInt())
             val aligned = snapshotPair.copy(
                 left = snapshotPair.left.copy(
                     closingTextBlock = snapshotPair.left.closingTextBlock.copy(
                         offsetYMm = ClosingTextBlockRules.clampOffsetYMm(alignedOffsetYMm),
+                        characterOffsetDots = alignment.characterOffsetDots,
                     ),
                 ),
             )
@@ -284,7 +319,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             pushHistory(next)
             applyHistoryState(next)
-            if (alignment.first != alignment.second) {
+            if (alignment.requestedOffsetDots != alignment.clampedOffsetDots) {
                 reportMessage("已对齐到左联尾字可用范围内的最近位置")
             } else {
                 reportMessage("已以右联为基准对齐左右联尾字")
