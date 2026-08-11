@@ -10,6 +10,7 @@ import com.wanlian.printer.model.CoupletSide
 import com.wanlian.printer.model.CoupletTemplate
 import com.wanlian.printer.model.DocumentMode
 import com.wanlian.printer.model.PairPrintPlan
+import com.wanlian.printer.model.PairFooterAlignmentRules
 import com.wanlian.printer.model.PrintSettings
 import com.wanlian.printer.model.PrintGate
 import com.wanlian.printer.model.TemplateNameRules
@@ -174,6 +175,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 preview = selectedPreview ?: it.preview,
             )
         }
+    }
+
+    fun alignPairFootersToSelected() {
+        val state = _uiState.value
+        val pair = state.pairDocument ?: return
+        if (state.documentMode != DocumentMode.PAIR) return
+        if (!pair.left.footerLabel.enabled || !pair.right.footerLabel.enabled) {
+            reportMessage("请先启用左右联的落款标签")
+            return
+        }
+        val aligned = PairFooterAlignmentRules.alignOtherToSelected(pair)
+        if (aligned == pair) return
+        _uiState.update {
+            it.copy(
+                pairDocument = aligned,
+                settings = aligned.selectedSettings,
+            )
+        }
+        schedulePreview(immediate = true)
+        reportMessage("已以${aligned.selectedSide.label}为基准对齐左右页尾")
     }
 
     fun keepPairSideAsSingle(side: CoupletSide) {

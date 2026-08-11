@@ -59,6 +59,7 @@ fun PrinterApp(
                 onEnablePairMode = viewModel::enablePairMode,
                 onKeepPairSideAsSingle = viewModel::keepPairSideAsSingle,
                 onSelectCoupletSide = viewModel::selectCoupletSide,
+                onAlignPairFooters = viewModel::alignPairFootersToSelected,
                 onRetryPairPrint = viewModel::retryPairPrint,
                 onSkipFailedPairSide = viewModel::skipFailedPairSide,
                 onCancelPairPrint = viewModel::cancelPairPrint,

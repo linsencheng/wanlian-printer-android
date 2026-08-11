@@ -104,6 +104,7 @@ fun EditorScreen(
     onEnablePairMode: () -> Unit,
     onKeepPairSideAsSingle: (CoupletSide) -> Unit,
     onSelectCoupletSide: (CoupletSide) -> Unit,
+    onAlignPairFooters: () -> Unit,
     onRetryPairPrint: () -> Unit,
     onSkipFailedPairSide: () -> Unit,
     onCancelPairPrint: () -> Unit,
@@ -213,6 +214,7 @@ fun EditorScreen(
                     EditorToolPanel(
                         state = state,
                         onSettingsChange = onSettingsChange,
+                        onAlignPairFooters = onAlignPairFooters,
                         modifier = Modifier.weight(0.35f).fillMaxSize(),
                     )
                 }
@@ -242,6 +244,7 @@ fun EditorScreen(
                     onContinueEditing = { focusPreview = false },
                     onSettingsChange = onSettingsChange,
                     onSelectCoupletSide = onSelectCoupletSide,
+                    onAlignPairFooters = onAlignPairFooters,
                     previewTransformState = previewTransformState,
                     modifier = Modifier.fillMaxSize().padding(contentPadding),
                 )
@@ -439,6 +442,7 @@ private fun PhoneEditorWorkspace(
     onContinueEditing: () -> Unit,
     onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
     onSelectCoupletSide: (CoupletSide) -> Unit,
+    onAlignPairFooters: () -> Unit,
     previewTransformState: PreviewTransformState,
     modifier: Modifier = Modifier,
 ) {
@@ -484,6 +488,7 @@ private fun PhoneEditorWorkspace(
                     onToolSelected = onToolSelected,
                     state = state,
                     onSettingsChange = onSettingsChange,
+                    onAlignPairFooters = onAlignPairFooters,
                     scrollState = selectedScrollState,
                     panelMode = panelSnap.mode,
                     onTogglePreviewSpace = onTogglePreviewSpace,

@@ -1,6 +1,7 @@
 package com.wanlian.printer.model
 
 import kotlin.math.max
+import kotlin.math.min
 
 enum class DocumentMode(val label: String) {
     SINGLE("单联"),
@@ -104,6 +105,68 @@ object PairLayoutRules {
 
     fun hasAlignedTextStart(document: CoupletPairDocument): Boolean =
         document.left.topMarginMm == document.right.topMarginMm
+}
+
+/**
+ * Aligns the other side's footer bottom baseline to the currently selected side.
+ * Footer content and decoration stay side-local after this one-shot operation.
+ */
+object PairFooterAlignmentRules {
+    private const val MAX_FOOTER_BOTTOM_MARGIN_MM = 300f
+
+    fun alignOtherToSelected(document: CoupletPairDocument): CoupletPairDocument {
+        val source = document.selectedSettings
+        val target = if (document.selectedSide == CoupletSide.LEFT) document.right else document.left
+        if (!source.footerLabel.enabled || !target.footerLabel.enabled) return document
+
+        val alignedTarget = alignTargetToSource(source = source, target = target)
+        return if (document.selectedSide == CoupletSide.LEFT) {
+            document.copy(right = alignedTarget)
+        } else {
+            document.copy(left = alignedTarget)
+        }
+    }
+
+    fun pageEndBaselineMm(settings: PrintSettings): Float =
+        settings.bottomMarginMm.coerceAtLeast(0f) +
+            PrintLayoutRules.cutGuideReserveMm(settings.cutGuide) +
+            settings.footerLabel.bottomMarginMm.coerceAtLeast(0f) -
+            FooterLabelAdjustmentLimits.clampOffsetYMm(settings.footerLabel.offsetYMm)
+
+    private fun alignTargetToSource(source: PrintSettings, target: PrintSettings): PrintSettings {
+        val targetFixedSafetyMm = target.bottomMarginMm.coerceAtLeast(0f) +
+            PrintLayoutRules.cutGuideReserveMm(target.cutGuide)
+        val requestedRelativeBaselineMm = pageEndBaselineMm(source) - targetFixedSafetyMm
+        val relativeBaselineMm = requestedRelativeBaselineMm.coerceIn(
+            -FooterLabelAdjustmentLimits.MAX_OFFSET_Y_MM,
+            MAX_FOOTER_BOTTOM_MARGIN_MM - FooterLabelAdjustmentLimits.MIN_OFFSET_Y_MM,
+        )
+
+        // bottomMargin - offset = relativeBaseline. Retain the target fine offset
+        // where possible, and only clamp it when the supported ranges require it.
+        val minimumOffset = max(
+            FooterLabelAdjustmentLimits.MIN_OFFSET_Y_MM,
+            -relativeBaselineMm,
+        )
+        val maximumOffset = min(
+            FooterLabelAdjustmentLimits.MAX_OFFSET_Y_MM,
+            MAX_FOOTER_BOTTOM_MARGIN_MM - relativeBaselineMm,
+        )
+        val alignedOffset = FooterLabelAdjustmentLimits.clampOffsetYMm(
+            target.footerLabel.offsetYMm,
+        ).coerceIn(minimumOffset, maximumOffset)
+        val alignedBottomMargin = (relativeBaselineMm + alignedOffset).coerceIn(
+            0f,
+            MAX_FOOTER_BOTTOM_MARGIN_MM,
+        )
+
+        return target.copy(
+            footerLabel = target.footerLabel.copy(
+                bottomMarginMm = alignedBottomMargin,
+                offsetYMm = alignedOffset,
+            ),
+        )
+    }
 }
 
 data class PairResolvedLengths(
