@@ -14,6 +14,7 @@ import com.wanlian.printer.model.BorderTemplate
 import com.wanlian.printer.model.CoupletTemplate
 import com.wanlian.printer.model.CoupletPairDocument
 import com.wanlian.printer.model.CoupletSide
+import com.wanlian.printer.model.ClosingTextBlockSettings
 import com.wanlian.printer.model.CutGuideSettings
 import com.wanlian.printer.model.CutGuideStyle
 import com.wanlian.printer.model.DevicePreferences
@@ -203,6 +204,7 @@ class TemplateRepository(context: Context) {
         put("threshold", settings.threshold)
         put("textAlignment", settings.textAlignment.name)
         put("textWeight", settings.textWeight.name)
+        put("closingTextBlock", closingTextBlockToJson(settings.closingTextBlock))
         put("printDirection", settings.printDirection.name)
         put("reversePrinting", settings.reversePrinting)
         put("bitmapChunkSize", settings.bitmapChunkSize)
@@ -242,6 +244,9 @@ class TemplateRepository(context: Context) {
             threshold = json.optInt("threshold", defaults.threshold),
             textAlignment = enumOrDefault(json.optString("textAlignment"), defaults.textAlignment),
             textWeight = enumOrDefault(json.optString("textWeight"), defaults.textWeight),
+            closingTextBlock = json.optJSONObject("closingTextBlock")
+                ?.let(::closingTextBlockFromJson)
+                ?: defaults.closingTextBlock,
             printDirection = enumOrDefault(json.optString("printDirection"), defaults.printDirection),
             reversePrinting = json.optBoolean("reversePrinting", defaults.reversePrinting),
             bitmapChunkSize = json.optInt("bitmapChunkSize", defaults.bitmapChunkSize),
@@ -251,6 +256,18 @@ class TemplateRepository(context: Context) {
             footerLabel = footerJson?.let(::footerLabelFromJson) ?: defaults.footerLabel,
             cutGuide = json.optJSONObject("cutGuide")?.let(::cutGuideFromJson)
                 ?: defaults.cutGuide,
+        )
+    }
+
+    private fun closingTextBlockToJson(settings: ClosingTextBlockSettings): JSONObject =
+        JSONObject().apply {
+            put("offsetYMm", settings.offsetYMm)
+        }
+
+    private fun closingTextBlockFromJson(json: JSONObject): ClosingTextBlockSettings {
+        val defaults = ClosingTextBlockSettings()
+        return defaults.copy(
+            offsetYMm = json.optDouble("offsetYMm", defaults.offsetYMm.toDouble()).toFloat(),
         )
     }
 

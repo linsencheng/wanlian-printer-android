@@ -113,6 +113,28 @@ class CoupletPairDocumentTest {
     }
 
     @Test
+    fun `left and right closing offsets remain independent`() {
+        val original = CoupletPairDocument(
+            left = PrintSettings(
+                text = "沉痛悼念外祖母  千古",
+                closingTextBlock = ClosingTextBlockSettings(offsetYMm = -8f),
+            ),
+            right = PrintSettings(
+                text = "愚侄夫妇率全家  叩挽",
+                closingTextBlock = ClosingTextBlockSettings(offsetYMm = 6f),
+            ),
+        )
+        val updated = original.replaceSelected(
+            original.left.copy(
+                closingTextBlock = original.left.closingTextBlock.copy(offsetYMm = -12f),
+            ),
+        )
+
+        assertEquals(-12f, updated.left.closingTextBlock.offsetYMm, 0.001f)
+        assertEquals(6f, updated.right.closingTextBlock.offsetYMm, 0.001f)
+    }
+
+    @Test
     fun `pair print plan always orders left before right`() {
         val jobs = PairPrintPlan.jobs(CoupletPairDocument.fromSingle(PrintSettings()))
         assertEquals(listOf(CoupletSide.LEFT, CoupletSide.RIGHT), jobs.map { it.side })

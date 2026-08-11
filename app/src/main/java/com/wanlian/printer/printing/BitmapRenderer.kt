@@ -8,6 +8,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import com.wanlian.printer.model.BorderPosition
 import com.wanlian.printer.model.BorderTemplate
+import com.wanlian.printer.model.ClosingTextBlockRules
 import com.wanlian.printer.model.CoupletPairDocument
 import com.wanlian.printer.model.PairLayoutRules
 import com.wanlian.printer.model.PersonPlacementMode
@@ -193,6 +194,9 @@ class BitmapRenderer(
             safeBottom = personSafeBottom,
             inlineTop = inlineFlow.blockTopDots?.let { topMargin + it },
         )
+        val closingSafeBottom = (
+            footerTop ?: (heightDots - bottomMargin - cutGuideReserve).toFloat()
+        ).coerceAtLeast(topMargin.toFloat() + 1f)
 
         val surfaces = createSurfaces(widthDots, heightDots)
         drawVerticalText(
@@ -205,6 +209,7 @@ class BitmapRenderer(
             topDots = topMargin.toFloat(),
             inlineInsertIndex = inlineFlow.insertIndex,
             inlineShiftDots = inlineFlow.extraHeightDots,
+            closingSafeBottomDots = closingSafeBottom,
         )
         personLayout?.let { layout ->
             personBlockRenderer.draw(surfaces.maskCanvas, settings.personBlock, layout)
@@ -393,6 +398,7 @@ class BitmapRenderer(
         topDots: Float,
         inlineInsertIndex: Int? = null,
         inlineShiftDots: Float = 0f,
+        closingSafeBottomDots: Float,
     ) {
         val paint = printTextPaint(layout.fontSizeDots, settings.textWeight, settings.fontId)
         val glyphWidth = layout.fontSizeDots * max(0.65f, FontRepository.resolve(settings.fontId).textScaleX)
@@ -405,22 +411,63 @@ class BitmapRenderer(
         }
         val rightColumnCenter = groupLeft + groupWidth - glyphWidth / 2f
         val metrics = paint.fontMetrics
+        val closingMatches = columns.map(ClosingTextBlockRules::matchColumn)
+        val closingBlockTop = columns.indices.minOfOrNull { columnIndex ->
+            closingMatches[columnIndex]?.characterIndexes?.minOfOrNull { characterIndex ->
+                topDots + characterIndex * layout.characterAdvanceDots +
+                    flowShiftDots(characterIndex, inlineInsertIndex, inlineShiftDots)
+            } ?: Float.POSITIVE_INFINITY
+        }?.takeIf(Float::isFinite)
+        val closingBlockBottom = columns.indices.maxOfOrNull { columnIndex ->
+            closingMatches[columnIndex]?.characterIndexes?.maxOfOrNull { characterIndex ->
+                topDots + characterIndex * layout.characterAdvanceDots +
+                    flowShiftDots(characterIndex, inlineInsertIndex, inlineShiftDots) +
+                    layout.glyphHeightDots
+            } ?: Float.NEGATIVE_INFINITY
+        }?.takeIf(Float::isFinite)
+        val requestedClosingOffsetDots = PrintUnits.mmToDots(
+            ClosingTextBlockRules.clampOffsetYMm(settings.closingTextBlock.offsetYMm),
+        ).toFloat()
+        val resolvedClosingOffsetDots = if (
+            closingBlockTop != null && closingBlockBottom != null
+        ) {
+            ClosingTextBlockRules.resolveOffsetDots(
+                requestedOffsetDots = requestedClosingOffsetDots,
+                blockTopDots = closingBlockTop,
+                blockBottomDots = closingBlockBottom,
+                safeTopDots = topDots,
+                safeBottomDots = closingSafeBottomDots,
+            )
+        } else {
+            0f
+        }
         columns.forEachIndexed { columnIndex, characters ->
             val x = rightColumnCenter - columnIndex * (glyphWidth + gap)
             characters.forEachIndexed { characterIndex, character ->
-                val flowShift = if (
-                    inlineInsertIndex != null && characterIndex >= inlineInsertIndex
+                val flowShift = flowShiftDots(characterIndex, inlineInsertIndex, inlineShiftDots)
+                val closingShift = if (
+                    characterIndex in (closingMatches[columnIndex]?.characterIndexes ?: emptySet())
                 ) {
-                    inlineShiftDots
+                    resolvedClosingOffsetDots
                 } else {
                     0f
                 }
                 val baseline = topDots + characterIndex * layout.characterAdvanceDots +
-                    flowShift - metrics.ascent
+                    flowShift + closingShift - metrics.ascent
                 surfaces.maskCanvas.drawText(character, x, baseline, paint)
                 surfaces.previewCanvas.drawText(character, x, baseline, paint)
             }
         }
+    }
+
+    private fun flowShiftDots(
+        characterIndex: Int,
+        inlineInsertIndex: Int?,
+        inlineShiftDots: Float,
+    ): Float = if (inlineInsertIndex != null && characterIndex >= inlineInsertIndex) {
+        inlineShiftDots
+    } else {
+        0f
     }
 
     private fun drawBorders(

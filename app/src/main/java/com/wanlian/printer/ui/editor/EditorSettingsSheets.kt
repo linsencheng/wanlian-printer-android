@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.wanlian.printer.MainUiState
 import com.wanlian.printer.model.BorderPosition
+import com.wanlian.printer.model.ClosingTextBlockRules
 import com.wanlian.printer.model.CutGuideStyle
 import com.wanlian.printer.model.FlowerStyle
 import com.wanlian.printer.model.FlowerAdjustmentLimits
@@ -233,6 +234,10 @@ fun TextSettingsContent(
         selected = settings.textWeight,
         label = { it.label },
         onSelected = { weight -> onSettingsChange { it.copy(textWeight = weight) } },
+    )
+    ClosingTextBlockSettingsSection(
+        settings = settings,
+        onSettingsChange = onSettingsChange,
     )
     PersonSettingsSection(
         settings = settings,
@@ -1042,6 +1047,46 @@ private fun bodyCharacterCount(text: String): Int = text.lineSequence()
     ?: 0
 
 @Composable
+private fun ClosingTextBlockSettingsSection(
+    settings: PrintSettings,
+    onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
+) {
+    val detectedPhrases = remember(settings.text) {
+        ClosingTextBlockRules.detectedPhrases(settings.text)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        CompactNumberControl(
+            title = "尾部字上下偏移",
+            value = settings.closingTextBlock.offsetYMm,
+            unit = "mm",
+            valueRange = ClosingTextBlockRules.MIN_OFFSET_Y_MM..
+                ClosingTextBlockRules.MAX_OFFSET_Y_MM,
+            step = 1f,
+            decimals = 1,
+            enabled = detectedPhrases.isNotEmpty(),
+            onValueChange = { value ->
+                onSettingsChange { current ->
+                    current.copy(
+                        closingTextBlock = current.closingTextBlock.copy(
+                            offsetYMm = ClosingTextBlockRules.clampOffsetYMm(value),
+                        ),
+                    )
+                }
+            },
+        )
+        Text(
+            text = if (detectedPhrases.isEmpty()) {
+                "未识别到千古、叩挽等收尾词"
+            } else {
+                "当前收尾字：${detectedPhrases.joinToString("、")}；负数上移，正数下移"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
 private fun CompactToolContent(
     selectedTool: EditorTool,
     state: MainUiState,
@@ -1065,6 +1110,10 @@ private fun CompactToolContent(
                 step = 2f,
                 decimals = 0,
                 onValueChange = { value -> onSettingsChange { it.copy(characterSpacingDots = value) } },
+            )
+            ClosingTextBlockSettingsSection(
+                settings = state.settings,
+                onSettingsChange = onSettingsChange,
             )
             PersonSettingsSection(
                 settings = state.settings,

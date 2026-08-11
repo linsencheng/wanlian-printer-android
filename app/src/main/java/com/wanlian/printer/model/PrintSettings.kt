@@ -19,6 +19,7 @@ data class PrintSettings(
     val threshold: Int = 160,
     val textAlignment: TextHorizontalAlignment = TextHorizontalAlignment.CENTER,
     val textWeight: TextWeight = TextWeight.BOLD,
+    val closingTextBlock: ClosingTextBlockSettings = ClosingTextBlockSettings(),
     val border: BorderSettings = BorderSettings(),
     val personBlock: PersonBlockSettings = PersonBlockSettings(),
     val footerLabel: FooterLabelSettings = FooterLabelSettings(),
