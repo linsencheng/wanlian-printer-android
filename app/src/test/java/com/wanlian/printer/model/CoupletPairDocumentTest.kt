@@ -198,6 +198,8 @@ class CoupletPairDocumentTest {
         assertEquals(-42f, document.right.footerLabel.offsetYMm, 0.001f)
         assertEquals(72f, document.left.footerLabel.fontSizeDots, 0.001f)
         assertEquals(96f, document.right.footerLabel.fontSizeDots, 0.001f)
+        assertEquals(18f, document.left.footerLabel.spacingDots, 0.001f)
+        assertEquals(32f, document.right.footerLabel.spacingDots, 0.001f)
         assertEquals(22f, document.left.footerLabel.flower.sizeMm, 0.001f)
         assertEquals(31f, document.right.footerLabel.flower.sizeMm, 0.001f)
         assertEquals(26f, document.left.bottomMarginMm, 0.001f)
@@ -206,6 +208,8 @@ class CoupletPairDocumentTest {
         assertTrue(!document.right.cutGuide.enabled)
         assertEquals(35f, printJobs[0].settings.footerLabel.offsetYMm, 0.001f)
         assertEquals(-42f, printJobs[1].settings.footerLabel.offsetYMm, 0.001f)
+        assertEquals(18f, printJobs[0].settings.footerLabel.spacingDots, 0.001f)
+        assertEquals(32f, printJobs[1].settings.footerLabel.spacingDots, 0.001f)
         assertEquals(26f, printJobs[0].settings.bottomMarginMm, 0.001f)
         assertEquals(44f, printJobs[1].settings.bottomMarginMm, 0.001f)
     }

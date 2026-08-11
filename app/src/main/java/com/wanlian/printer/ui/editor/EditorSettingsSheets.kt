@@ -89,6 +89,7 @@ fun EmbeddedEditorPanel(
     state: MainUiState,
     onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
     onAlignPairFooters: () -> Unit,
+    onAlignPairClosingBlocks: () -> Unit,
     scrollState: ScrollState,
     panelMode: EditorPanelMode,
     onTogglePreviewSpace: () -> Unit,
@@ -180,6 +181,7 @@ fun EmbeddedEditorPanel(
                                 state = state,
                                 onSettingsChange = onSettingsChange,
                                 onAlignPairFooters = onAlignPairFooters,
+                                onAlignPairClosingBlocks = onAlignPairClosingBlocks,
                             )
                         }
                     }
@@ -431,6 +433,7 @@ fun FooterSettingsContent(
     state: MainUiState,
     onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
     onAlignPairFooters: () -> Unit,
+    onAlignPairClosingBlocks: () -> Unit,
 ) {
     var showFooterFontPicker by remember { mutableStateOf(false) }
     Text("落款小标签", style = MaterialTheme.typography.labelLarge)
@@ -438,27 +441,23 @@ fun FooterSettingsContent(
         val pair = state.pairDocument
         val bothFootersEnabled = pair?.left?.footerLabel?.enabled == true &&
             pair.right.footerLabel.enabled
-        Text(
-            text = "当前编辑：${state.pairDocument?.selectedSide?.label ?: "左联"}落款",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        OutlinedButton(
-            onClick = onAlignPairFooters,
-            enabled = bothFootersEnabled,
+        val bothClosingBlocksDetected = pair != null &&
+            ClosingTextBlockRules.detectedPhrases(pair.left.text).isNotEmpty() &&
+            ClosingTextBlockRules.detectedPhrases(pair.right.text).isNotEmpty()
+        HorizontalDivider()
+        Row(
             modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("以${pair?.selectedSide?.label ?: "左联"}为基准一键对齐页尾")
+            Text("双联对齐", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+            TextButton(onClick = onAlignPairFooters, enabled = bothFootersEnabled) {
+                Text("页尾")
+            }
+            TextButton(onClick = onAlignPairClosingBlocks, enabled = bothClosingBlocksDetected) {
+                Text("尾字")
+            }
         }
-        Text(
-            text = if (bothFootersEnabled) {
-                "对齐另一联的页尾底线；文字、字体和花朵样式保持不变"
-            } else {
-                "启用左右联的落款标签后可一键对齐"
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        HorizontalDivider()
     }
     SwitchRow(
         title = "启用落款标签",
@@ -528,7 +527,7 @@ fun FooterSettingsContent(
             title = "落款字间距",
             value = state.settings.footerLabel.spacingDots,
             unit = "dots",
-            valueRange = 0f..120f,
+            valueRange = 0f..150f,
             step = 2f,
             decimals = 0,
             onValueChange = { value ->

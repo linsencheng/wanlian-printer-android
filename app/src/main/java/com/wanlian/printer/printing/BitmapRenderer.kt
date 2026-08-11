@@ -8,6 +8,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import com.wanlian.printer.model.BorderPosition
 import com.wanlian.printer.model.BorderTemplate
+import com.wanlian.printer.model.ClosingTextBlockAlignmentGeometry
 import com.wanlian.printer.model.ClosingTextBlockRules
 import com.wanlian.printer.model.CoupletPairDocument
 import com.wanlian.printer.model.FooterBlockLayoutEngine
@@ -35,6 +36,7 @@ data class RenderedBitmap(
     val mainAreaWidthMm: Float = paperWidthMm,
     val personBlockBounds: PersonBlockPreviewBounds? = null,
     val personBlockDraggable: Boolean = false,
+    val closingTextBlockBounds: ClosingTextBlockBounds? = null,
 )
 
 data class PersonBlockPreviewBounds(
@@ -42,6 +44,14 @@ data class PersonBlockPreviewBounds(
     val topNorm: Float,
     val rightNorm: Float,
     val bottomNorm: Float,
+)
+
+data class ClosingTextBlockBounds(
+    val topDots: Float,
+    val bottomDots: Float,
+    val centerYDots: Float,
+    val alignmentGeometry: ClosingTextBlockAlignmentGeometry,
+    val resolvedOffsetDots: Float,
 )
 
 data class RenderedCoupletPair(
@@ -252,7 +262,35 @@ class BitmapRenderer(
             personBlockBounds = personLayout?.bounds?.toPreviewBounds(widthDots, heightDots),
             personBlockDraggable = personLayout != null &&
                 settings.personBlock.placementMode == PersonPlacementMode.SIDE_OVERLAY,
+            closingTextBlockBounds = textPlacement.closingBlockTopDots?.let { topDots ->
+                val bottomDots = requireNotNull(textPlacement.closingBlockBottomDots)
+                ClosingTextBlockBounds(
+                    topDots = topDots + textPlacement.closingOffsetDots,
+                    bottomDots = bottomDots + textPlacement.closingOffsetDots,
+                    centerYDots = (topDots + bottomDots) / 2f + textPlacement.closingOffsetDots,
+                    alignmentGeometry = ClosingTextBlockAlignmentGeometry(
+                        zeroOffsetCenterYDots = (topDots + bottomDots) / 2f,
+                        minimumOffsetDots = textPlacement.minimumClosingOffsetDots,
+                        maximumOffsetDots = textPlacement.maximumClosingOffsetDots,
+                    ),
+                    resolvedOffsetDots = textPlacement.closingOffsetDots,
+                )
+            },
         )
+    }
+
+    /** Measures the same closing block bounds used by preview and print without retaining bitmaps. */
+    fun measureClosingTextBlockBounds(
+        settings: PrintSettings,
+        forcedPaperLengthMm: Float? = null,
+    ): ClosingTextBlockBounds? {
+        val rendered = renderCouplet(settings, forcedPaperLengthMm)
+        return try {
+            rendered.closingTextBlockBounds
+        } finally {
+            rendered.previewBitmap.recycle()
+            rendered.printMask.recycle()
+        }
     }
 
     fun renderTestPage(settings: PrintSettings): RenderedBitmap {
@@ -506,6 +544,28 @@ class BitmapRenderer(
             closingCharacterIndexes = closingIndexes,
             closingOffsetDots = resolvedClosingOffset,
             contentBottomDots = contentBottom,
+            closingBlockTopDots = closingBlockTop,
+            closingBlockBottomDots = closingBlockBottom,
+            minimumClosingOffsetDots = if (closingBlockTop != null && closingBlockBottom != null) {
+                ClosingTextBlockRules.safeOffsetBounds(
+                    blockTopDots = closingBlockTop,
+                    blockBottomDots = closingBlockBottom,
+                    safeTopDots = topDots,
+                    safeBottomDots = safeBottomDots,
+                )?.first ?: 0f
+            } else {
+                0f
+            },
+            maximumClosingOffsetDots = if (closingBlockTop != null && closingBlockBottom != null) {
+                ClosingTextBlockRules.safeOffsetBounds(
+                    blockTopDots = closingBlockTop,
+                    blockBottomDots = closingBlockBottom,
+                    safeTopDots = topDots,
+                    safeBottomDots = safeBottomDots,
+                )?.second ?: 0f
+            } else {
+                0f
+            },
         )
     }
 
@@ -657,6 +717,10 @@ class BitmapRenderer(
         val closingCharacterIndexes: List<Set<Int>>,
         val closingOffsetDots: Float,
         val contentBottomDots: Float,
+        val closingBlockTopDots: Float? = null,
+        val closingBlockBottomDots: Float? = null,
+        val minimumClosingOffsetDots: Float = 0f,
+        val maximumClosingOffsetDots: Float = 0f,
     )
 
     private data class BorderGeometry(

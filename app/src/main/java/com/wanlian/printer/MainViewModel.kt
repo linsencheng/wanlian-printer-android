@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.wanlian.printer.bluetooth.BluetoothManager
 import com.wanlian.printer.model.ConnectionStatus
+import com.wanlian.printer.model.ClosingTextBlockRules
 import com.wanlian.printer.model.CoupletPairDocument
 import com.wanlian.printer.model.CoupletSide
 import com.wanlian.printer.model.CoupletTemplate
@@ -12,6 +13,7 @@ import com.wanlian.printer.model.DocumentMode
 import com.wanlian.printer.model.PairPrintPlan
 import com.wanlian.printer.model.PairFooterAlignmentRules
 import com.wanlian.printer.model.PrintSettings
+import com.wanlian.printer.model.PrintUnits
 import com.wanlian.printer.model.PrintGate
 import com.wanlian.printer.model.TemplateNameRules
 import com.wanlian.printer.model.PrinterConnectionInfo
@@ -31,10 +33,17 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 data class PairPrintFailure(
     val side: CoupletSide,
     val reason: String,
+)
+
+private data class EditorHistoryState(
+    val settings: PrintSettings,
+    val documentMode: DocumentMode,
+    val pairDocument: CoupletPairDocument?,
 )
 
 data class MainUiState(
@@ -74,7 +83,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
     private var previewJob: Job? = null
     private var testPreviewJob: Job? = null
-    private val settingsHistory = mutableListOf(PrintSettings())
+    private val settingsHistory = mutableListOf(
+        EditorHistoryState(
+            settings = PrintSettings(),
+            documentMode = DocumentMode.SINGLE,
+            pairDocument = null,
+        ),
+    )
     private var historyIndex = 0
     private var autoReconnectAttempted = false
 
@@ -90,26 +105,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateSettings(transform: (PrintSettings) -> PrintSettings) {
-        val updated = transform(_uiState.value.settings)
-        if (updated == _uiState.value.settings) return
-        if (historyIndex < settingsHistory.lastIndex) {
-            settingsHistory.subList(historyIndex + 1, settingsHistory.size).clear()
+        val state = _uiState.value
+        val updated = transform(state.settings)
+        if (updated == state.settings) return
+        val updatedPair = if (state.documentMode == DocumentMode.PAIR) {
+            state.pairDocument?.replaceSelected(updated)
+        } else {
+            null
         }
-        settingsHistory += updated
-        if (settingsHistory.size > MAX_HISTORY) settingsHistory.removeAt(0) else historyIndex++
-        applySettings(updated)
+        val next = EditorHistoryState(
+            settings = updatedPair?.selectedSettings ?: updated,
+            documentMode = state.documentMode,
+            pairDocument = updatedPair ?: state.pairDocument,
+        )
+        pushHistory(next)
+        applyHistoryState(next)
     }
 
     fun undo() {
         if (historyIndex <= 0) return
         historyIndex--
-        applySettings(settingsHistory[historyIndex])
+        applyHistoryState(settingsHistory[historyIndex])
     }
 
     fun redo() {
         if (historyIndex >= settingsHistory.lastIndex) return
         historyIndex++
-        applySettings(settingsHistory[historyIndex])
+        applyHistoryState(settingsHistory[historyIndex])
     }
 
     fun startScan() = bluetoothManager.startScan()
@@ -148,7 +170,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val state = _uiState.value
         if (state.documentMode == DocumentMode.PAIR) return
         val pair = CoupletPairDocument.fromSingle(state.settings)
-        resetHistory(pair.left)
+        resetHistory(
+            EditorHistoryState(
+                settings = pair.left,
+                documentMode = DocumentMode.PAIR,
+                pairDocument = pair,
+            ),
+        )
         _uiState.update {
             it.copy(
                 documentMode = DocumentMode.PAIR,
@@ -167,7 +195,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             CoupletSide.LEFT -> state.pairPreview?.left
             CoupletSide.RIGHT -> state.pairPreview?.right
         }
-        resetHistory(pair.selectedSettings)
+        resetHistory(
+            EditorHistoryState(
+                settings = pair.selectedSettings,
+                documentMode = state.documentMode,
+                pairDocument = pair,
+            ),
+        )
         _uiState.update {
             it.copy(
                 pairDocument = pair,
@@ -187,14 +221,75 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val aligned = PairFooterAlignmentRules.alignOtherToSelected(pair)
         if (aligned == pair) return
-        _uiState.update {
-            it.copy(
-                pairDocument = aligned,
-                settings = aligned.selectedSettings,
-            )
-        }
-        schedulePreview(immediate = true)
+        val next = EditorHistoryState(
+            settings = aligned.selectedSettings,
+            documentMode = DocumentMode.PAIR,
+            pairDocument = aligned,
+        )
+        pushHistory(next)
+        applyHistoryState(next)
         reportMessage("已以${aligned.selectedSide.label}为基准对齐左右页尾")
+    }
+
+    fun alignPairClosingBlocks() {
+        val state = _uiState.value
+        val pair = state.pairDocument ?: return
+        if (state.documentMode != DocumentMode.PAIR) return
+
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.Default) {
+                val pairLength = bitmapRenderer.resolvePairPaperLengthMm(pair)
+                val leftBounds = bitmapRenderer.measureClosingTextBlockBounds(pair.left, pairLength)
+                val rightBounds = bitmapRenderer.measureClosingTextBlockBounds(pair.right, pairLength)
+                if (leftBounds == null || rightBounds == null) {
+                    null
+                } else {
+                    val requestedOffsetDots = rightBounds.centerYDots -
+                        leftBounds.alignmentGeometry.zeroOffsetCenterYDots
+                    val clampedOffsetDots = ClosingTextBlockRules.alignmentOffsetDots(
+                        geometry = leftBounds.alignmentGeometry,
+                        anchorCenterYDots = rightBounds.centerYDots,
+                    )
+                    pair to Triple(requestedOffsetDots, clampedOffsetDots, rightBounds.centerYDots)
+                }
+            }
+            if (result == null) {
+                reportMessage("未找到左右联可对齐的尾字块")
+                return@launch
+            }
+            val (snapshotPair, alignment) = result
+            if (
+                _uiState.value.documentMode != DocumentMode.PAIR ||
+                _uiState.value.pairDocument != snapshotPair
+            ) {
+                return@launch
+            }
+            val (_, clampedOffsetDots, _) = alignment
+            val alignedOffsetYMm = PrintUnits.dotsToMm(clampedOffsetDots.roundToInt())
+            val aligned = snapshotPair.copy(
+                left = snapshotPair.left.copy(
+                    closingTextBlock = snapshotPair.left.closingTextBlock.copy(
+                        offsetYMm = ClosingTextBlockRules.clampOffsetYMm(alignedOffsetYMm),
+                    ),
+                ),
+            )
+            if (aligned == snapshotPair) {
+                reportMessage("左右联尾字已经对齐")
+                return@launch
+            }
+            val next = EditorHistoryState(
+                settings = aligned.selectedSettings,
+                documentMode = DocumentMode.PAIR,
+                pairDocument = aligned,
+            )
+            pushHistory(next)
+            applyHistoryState(next)
+            if (alignment.first != alignment.second) {
+                reportMessage("已对齐到左联尾字可用范围内的最近位置")
+            } else {
+                reportMessage("已以右联为基准对齐左右联尾字")
+            }
+        }
     }
 
     fun keepPairSideAsSingle(side: CoupletSide) {
@@ -202,7 +297,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val pair = state.pairDocument ?: return
         val keptSettings = if (side == CoupletSide.LEFT) pair.left else pair.right
         val keptPreview = if (side == CoupletSide.LEFT) state.pairPreview?.left else state.pairPreview?.right
-        resetHistory(keptSettings)
+        resetHistory(
+            EditorHistoryState(
+                settings = keptSettings,
+                documentMode = DocumentMode.SINGLE,
+                pairDocument = null,
+            ),
+        )
         _uiState.update {
             it.copy(
                 documentMode = DocumentMode.SINGLE,
@@ -296,10 +397,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             missingFont = missingFont || it.second
         }.first
         val updated = pair?.selectedSettings ?: normalizedSingle
-        resetHistory(updated)
+        val documentMode = if (pair == null) DocumentMode.SINGLE else DocumentMode.PAIR
+        resetHistory(
+            EditorHistoryState(
+                settings = updated,
+                documentMode = documentMode,
+                pairDocument = pair,
+            ),
+        )
         _uiState.update {
             it.copy(
-                documentMode = if (pair == null) DocumentMode.SINGLE else DocumentMode.PAIR,
+                documentMode = documentMode,
                 pairDocument = pair,
                 settings = updated,
                 pairPreview = null,
@@ -463,16 +571,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun applySettings(settings: PrintSettings) {
+    private fun pushHistory(next: EditorHistoryState) {
+        if (historyIndex < settingsHistory.lastIndex) {
+            settingsHistory.subList(historyIndex + 1, settingsHistory.size).clear()
+        }
+        settingsHistory += next
+        if (settingsHistory.size > MAX_HISTORY) {
+            settingsHistory.removeAt(0)
+        }
+        historyIndex = settingsHistory.lastIndex
+    }
+
+    private fun applyHistoryState(history: EditorHistoryState) {
         _uiState.update {
-            val pair = if (it.documentMode == DocumentMode.PAIR) {
-                it.pairDocument?.replaceSelected(settings)
-            } else {
-                null
-            }
             it.copy(
-                settings = pair?.selectedSettings ?: settings,
-                pairDocument = pair ?: it.pairDocument,
+                settings = history.settings,
+                documentMode = history.documentMode,
+                pairDocument = history.pairDocument,
                 canUndo = historyIndex > 0,
                 canRedo = historyIndex < settingsHistory.lastIndex,
             )
@@ -626,9 +741,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun resetHistory(settings: PrintSettings) {
+    private fun resetHistory(history: EditorHistoryState) {
         settingsHistory.clear()
-        settingsHistory += settings
+        settingsHistory += history
         historyIndex = 0
         _uiState.update { it.copy(canUndo = false, canRedo = false) }
     }

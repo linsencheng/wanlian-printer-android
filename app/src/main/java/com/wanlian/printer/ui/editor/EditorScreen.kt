@@ -105,6 +105,7 @@ fun EditorScreen(
     onKeepPairSideAsSingle: (CoupletSide) -> Unit,
     onSelectCoupletSide: (CoupletSide) -> Unit,
     onAlignPairFooters: () -> Unit,
+    onAlignPairClosingBlocks: () -> Unit,
     onRetryPairPrint: () -> Unit,
     onSkipFailedPairSide: () -> Unit,
     onCancelPairPrint: () -> Unit,
@@ -215,6 +216,7 @@ fun EditorScreen(
                         state = state,
                         onSettingsChange = onSettingsChange,
                         onAlignPairFooters = onAlignPairFooters,
+                        onAlignPairClosingBlocks = onAlignPairClosingBlocks,
                         modifier = Modifier.weight(0.35f).fillMaxSize(),
                     )
                 }
@@ -245,6 +247,7 @@ fun EditorScreen(
                     onSettingsChange = onSettingsChange,
                     onSelectCoupletSide = onSelectCoupletSide,
                     onAlignPairFooters = onAlignPairFooters,
+                    onAlignPairClosingBlocks = onAlignPairClosingBlocks,
                     previewTransformState = previewTransformState,
                     modifier = Modifier.fillMaxSize().padding(contentPadding),
                 )
@@ -443,6 +446,7 @@ private fun PhoneEditorWorkspace(
     onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
     onSelectCoupletSide: (CoupletSide) -> Unit,
     onAlignPairFooters: () -> Unit,
+    onAlignPairClosingBlocks: () -> Unit,
     previewTransformState: PreviewTransformState,
     modifier: Modifier = Modifier,
 ) {
@@ -489,6 +493,7 @@ private fun PhoneEditorWorkspace(
                     state = state,
                     onSettingsChange = onSettingsChange,
                     onAlignPairFooters = onAlignPairFooters,
+                    onAlignPairClosingBlocks = onAlignPairClosingBlocks,
                     scrollState = selectedScrollState,
                     panelMode = panelSnap.mode,
                     onTogglePreviewSpace = onTogglePreviewSpace,

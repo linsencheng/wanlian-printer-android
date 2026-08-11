@@ -60,6 +60,7 @@ fun PrinterApp(
                 onKeepPairSideAsSingle = viewModel::keepPairSideAsSingle,
                 onSelectCoupletSide = viewModel::selectCoupletSide,
                 onAlignPairFooters = viewModel::alignPairFootersToSelected,
+                onAlignPairClosingBlocks = viewModel::alignPairClosingBlocks,
                 onRetryPairPrint = viewModel::retryPairPrint,
                 onSkipFailedPairSide = viewModel::skipFailedPairSide,
                 onCancelPairPrint = viewModel::cancelPairPrint,

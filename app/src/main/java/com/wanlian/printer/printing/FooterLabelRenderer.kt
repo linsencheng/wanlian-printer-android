@@ -53,9 +53,11 @@ class FooterLabelRenderer(
                 height to width
             }
             else -> {
-                val height = bodyGlyphHeight * bodyLines.size +
-                    bodySpacing * (bodyLines.size - 1).coerceAtLeast(0)
-                height to bodyLines.maxOf(bodyPaint::measureText)
+                val height = bodyGlyphHeight * bodyLines.size
+                val width = bodyLines.maxOf { line ->
+                    horizontalLineWidth(line, bodyPaint, bodySpacing)
+                }
+                height to width
             }
         }
 
@@ -132,7 +134,10 @@ class FooterLabelRenderer(
             measured.bodyTextWidthDots,
         )
         val fontMetrics = paint.fontMetrics
-        val glyphAdvance = fontMetrics.descent - fontMetrics.ascent + settings.spacingDots.coerceAtLeast(0f)
+        val glyphAdvance = FooterTextLayoutRules.glyphAdvanceDots(
+            glyphExtentDots = fontMetrics.descent - fontMetrics.ascent,
+            spacingDots = settings.spacingDots,
+        )
         when (settings.orientation) {
             FooterTextOrientation.VERTICAL -> {
                 val rightCenter = left + measured.bodyTextWidthDots - columnWidth / 2f
@@ -147,8 +152,16 @@ class FooterLabelRenderer(
             FooterTextOrientation.HORIZONTAL -> {
                 val centerX = left + measured.bodyTextWidthDots / 2f
                 lines.forEachIndexed { lineIndex, line ->
-                    val baseline = topDots + lineIndex * glyphAdvance - fontMetrics.ascent
-                    canvas.drawText(line, centerX, baseline, paint)
+                    val characters = codePoints(line)
+                    val lineWidth = horizontalLineWidth(line, paint, settings.spacingDots.coerceAtLeast(0f))
+                    var x = centerX - lineWidth / 2f
+                    val baseline = topDots + lineIndex * (fontMetrics.descent - fontMetrics.ascent) -
+                        fontMetrics.ascent
+                    paint.textAlign = Paint.Align.LEFT
+                    characters.forEach { character ->
+                        canvas.drawText(character, x, baseline, paint)
+                        x += paint.measureText(character) + settings.spacingDots.coerceAtLeast(0f)
+                    }
                 }
             }
         }
@@ -220,6 +233,18 @@ class FooterLabelRenderer(
             add(String(Character.toChars(codePoint)))
             offset += Character.charCount(codePoint)
         }
+    }
+
+    private fun horizontalLineWidth(
+        text: String,
+        paint: Paint,
+        spacingDots: Float,
+    ): Float {
+        val characters = codePoints(text)
+        return FooterTextLayoutRules.horizontalRunWidthDots(
+            glyphWidthsDots = characters.map(paint::measureText),
+            spacingDots = spacingDots,
+        )
     }
 
     private companion object {

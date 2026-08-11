@@ -29,6 +29,7 @@ fun EditorToolPanel(
     state: MainUiState,
     onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
     onAlignPairFooters: () -> Unit,
+    onAlignPairClosingBlocks: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var selectedTool by remember { mutableStateOf(EditorTool.TEXT) }
@@ -67,6 +68,7 @@ fun EditorToolPanel(
                         state = state,
                         onSettingsChange = onSettingsChange,
                         onAlignPairFooters = onAlignPairFooters,
+                        onAlignPairClosingBlocks = onAlignPairClosingBlocks,
                     )
                 }
             }

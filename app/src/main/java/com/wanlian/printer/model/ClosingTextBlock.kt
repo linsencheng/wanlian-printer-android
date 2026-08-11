@@ -13,6 +13,12 @@ data class ClosingTextMatch(
     val characterIndexes: Set<Int>,
 )
 
+data class ClosingTextBlockAlignmentGeometry(
+    val zeroOffsetCenterYDots: Float,
+    val minimumOffsetDots: Float,
+    val maximumOffsetDots: Float,
+)
+
 object ClosingTextBlockRules {
     const val MIN_OFFSET_Y_MM = -500f
     const val MAX_OFFSET_Y_MM = 500f
@@ -79,12 +85,34 @@ object ClosingTextBlockRules {
     ): Float {
         // Preserve the legacy layout exactly until the user makes an adjustment.
         if (requestedOffsetDots == 0f) return 0f
+        return safeOffsetBounds(
+            blockTopDots = blockTopDots,
+            blockBottomDots = blockBottomDots,
+            safeTopDots = safeTopDots,
+            safeBottomDots = safeBottomDots,
+        )?.let { bounds -> requestedOffsetDots.coerceIn(bounds.first, bounds.second) } ?: 0f
+    }
+
+    fun alignmentOffsetDots(
+        geometry: ClosingTextBlockAlignmentGeometry,
+        anchorCenterYDots: Float,
+    ): Float = (anchorCenterYDots - geometry.zeroOffsetCenterYDots).coerceIn(
+        geometry.minimumOffsetDots,
+        geometry.maximumOffsetDots,
+    )
+
+    fun safeOffsetBounds(
+        blockTopDots: Float,
+        blockBottomDots: Float,
+        safeTopDots: Float,
+        safeBottomDots: Float,
+    ): Pair<Float, Float>? {
         val minimumOffset = safeTopDots - blockTopDots
         val maximumOffset = safeBottomDots - blockBottomDots
         return if (minimumOffset <= maximumOffset) {
-            requestedOffsetDots.coerceIn(minimumOffset, maximumOffset)
+            minimumOffset to maximumOffset
         } else {
-            0f
+            null
         }
     }
 }

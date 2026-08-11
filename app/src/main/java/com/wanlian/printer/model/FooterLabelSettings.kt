@@ -148,6 +148,13 @@ object FooterTextLayoutRules {
         }
     }
 
+    fun glyphAdvanceDots(glyphExtentDots: Float, spacingDots: Float): Float =
+        glyphExtentDots + spacingDots.coerceAtLeast(0f)
+
+    fun horizontalRunWidthDots(glyphWidthsDots: List<Float>, spacingDots: Float): Float =
+        glyphWidthsDots.sum() + spacingDots.coerceAtLeast(0f) *
+            (glyphWidthsDots.size - 1).coerceAtLeast(0)
+
     private fun codePoints(text: String): List<String> = buildList {
         var offset = 0
         while (offset < text.length) {

@@ -71,4 +71,35 @@ class ClosingTextBlockRulesTest {
             0.001f,
         )
     }
+
+    @Test
+    fun `pair alignment solves the moving block offset from real block centers`() {
+        val geometry = ClosingTextBlockAlignmentGeometry(
+            zeroOffsetCenterYDots = 140f,
+            minimumOffsetDots = -30f,
+            maximumOffsetDots = 80f,
+        )
+
+        val offset = ClosingTextBlockRules.alignmentOffsetDots(
+            geometry = geometry,
+            anchorCenterYDots = 185f,
+        )
+
+        assertEquals(45f, offset, 0.001f)
+        assertEquals(185f, geometry.zeroOffsetCenterYDots + offset, 0.001f)
+    }
+
+    @Test
+    fun `pair alignment clamps moving block inside its own safe area`() {
+        val offset = ClosingTextBlockRules.alignmentOffsetDots(
+            geometry = ClosingTextBlockAlignmentGeometry(
+                zeroOffsetCenterYDots = 140f,
+                minimumOffsetDots = -30f,
+                maximumOffsetDots = 80f,
+            ),
+            anchorCenterYDots = 260f,
+        )
+
+        assertEquals(80f, offset, 0.001f)
+    }
 }
