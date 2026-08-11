@@ -1,18 +1,28 @@
 package com.wanlian.printer.ui.editor
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -23,85 +33,148 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.wanlian.printer.MainUiState
 import com.wanlian.printer.model.BorderPosition
-import com.wanlian.printer.model.PrintDirection
+import com.wanlian.printer.model.CutGuideStyle
+import com.wanlian.printer.model.FlowerStyle
+import com.wanlian.printer.model.FlowerAdjustmentLimits
+import com.wanlian.printer.model.FooterLabelPosition
+import com.wanlian.printer.model.FooterTextOrientation
+import com.wanlian.printer.model.FooterPerson
+import com.wanlian.printer.model.PersonLayout
+import com.wanlian.printer.model.PersonLayoutRules
 import com.wanlian.printer.model.PrintSettings
+import com.wanlian.printer.model.PrintUnits
 import com.wanlian.printer.model.TextHorizontalAlignment
 import com.wanlian.printer.model.TextWeight
 import com.wanlian.printer.printing.RenderedBitmap
 import com.wanlian.printer.ui.components.BorderPicker
 import com.wanlian.printer.ui.components.ChoiceChips
 import com.wanlian.printer.ui.components.CompactNumberControl
+import com.wanlian.printer.ui.components.FontPickerDialog
+import com.wanlian.printer.ui.components.FlowerStylePicker
 import com.wanlian.printer.ui.components.SwitchRow
+import com.wanlian.printer.printing.FontRepository
 import java.util.Locale
 
 enum class EditorTool(val label: String) {
     TEXT("文本"),
     BORDER("边框"),
     LAYOUT("排版"),
-    MORE("更多"),
+    FOOTER("页尾"),
+}
+
+enum class EditorPanelMode {
+    MINIMIZED,
+    COMPACT,
+    EXPANDED,
 }
 
 @Composable
-fun EditorSettingsSheet(
-    tool: EditorTool,
+fun EmbeddedEditorPanel(
+    selectedTool: EditorTool,
+    onToolSelected: (EditorTool) -> Unit,
     state: MainUiState,
     onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
-    onOpenSettings: () -> Unit,
-    onPrintTest: () -> Unit,
-    onPrintPolarityTest: () -> Unit,
-    onDone: () -> Unit,
+    scrollState: ScrollState,
+    panelMode: EditorPanelMode,
+    onTogglePreviewSpace: () -> Unit,
+    panelFraction: Float,
+    workspaceHeightPx: Float,
+    onPanelFractionChange: (Float) -> Unit,
+    onPanelDragStopped: (Float) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(0.7f)
-            .navigationBarsPadding(),
+    val dragState = rememberDraggableState { deltaPixels ->
+        val nextFraction = panelFraction - (deltaPixels / workspaceHeightPx)
+        onPanelFractionChange(nextFraction.coerceIn(0.13f, 0.60f))
+    }
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "${tool.label}设置",
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-            )
-            TextButton(onClick = onDone) { Text("完成") }
-        }
-        HorizontalDivider()
         Column(
-            modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 18.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize(),
         ) {
-            when (tool) {
-                EditorTool.TEXT -> TextSettingsContent(
-                    settings = state.settings,
-                    onSettingsChange = onSettingsChange,
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(30.dp)
+                    .clickable(onClick = onTogglePreviewSpace)
+                    .draggable(
+                        state = dragState,
+                        orientation = Orientation.Vertical,
+                        onDragStopped = { onPanelDragStopped(panelFraction) },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(52.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)),
                 )
-                EditorTool.BORDER -> BorderSettingsContent(
-                    settings = state.settings,
-                    onSettingsChange = onSettingsChange,
-                )
-                EditorTool.LAYOUT -> LayoutSettingsContent(
-                    settings = state.settings,
-                    rendered = state.preview,
-                    onSettingsChange = onSettingsChange,
-                )
-                EditorTool.MORE -> MoreSettingsContent(
-                    state = state,
-                    onSettingsChange = onSettingsChange,
-                    onOpenSettings = onOpenSettings,
-                    onPrintTest = onPrintTest,
-                    onPrintPolarityTest = onPrintPolarityTest,
-                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                EditorTool.entries.forEach { tool ->
+                    FilterChip(
+                        selected = selectedTool == tool,
+                        onClick = { onToolSelected(tool) },
+                        label = { Text(tool.label) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            if (panelMode != EditorPanelMode.MINIMIZED) {
+                HorizontalDivider()
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(scrollState)
+                        .padding(horizontal = 18.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    if (panelMode == EditorPanelMode.COMPACT) {
+                        CompactToolContent(
+                            selectedTool = selectedTool,
+                            state = state,
+                            onSettingsChange = onSettingsChange,
+                        )
+                    } else {
+                        when (selectedTool) {
+                            EditorTool.TEXT -> TextSettingsContent(
+                                settings = state.settings,
+                                onSettingsChange = onSettingsChange,
+                            )
+                            EditorTool.BORDER -> BorderSettingsContent(
+                                settings = state.settings,
+                                onSettingsChange = onSettingsChange,
+                            )
+                            EditorTool.LAYOUT -> LayoutSettingsContent(
+                                settings = state.settings,
+                                rendered = state.preview,
+                                onSettingsChange = onSettingsChange,
+                            )
+                            EditorTool.FOOTER -> FooterSettingsContent(
+                                state = state,
+                                onSettingsChange = onSettingsChange,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -112,6 +185,7 @@ fun TextSettingsContent(
     settings: PrintSettings,
     onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
 ) {
+    var showFontPicker by remember { mutableStateOf(false) }
     OutlinedTextField(
         value = settings.text,
         onValueChange = { text -> onSettingsChange { it.copy(text = text) } },
@@ -121,7 +195,10 @@ fun TextSettingsContent(
         minLines = 3,
         maxLines = 6,
     )
-    InfoValueRow("字体", "系统 Serif")
+    FontSelectorRow(
+        fontId = settings.fontId,
+        onClick = { showFontPicker = true },
+    )
     SwitchRow(
         title = "自动字号",
         subtitle = "根据纸宽、列数与边框自动计算",
@@ -142,7 +219,7 @@ fun TextSettingsContent(
         title = "字间距",
         value = settings.characterSpacingDots,
         unit = "dots",
-        valueRange = 0f..120f,
+        valueRange = 0f..240f,
         step = 2f,
         decimals = 0,
         onValueChange = { value -> onSettingsChange { it.copy(characterSpacingDots = value) } },
@@ -170,6 +247,13 @@ fun TextSettingsContent(
         step = 1f,
         onValueChange = { value -> onSettingsChange { it.copy(bottomMarginMm = value) } },
     )
+    if (showFontPicker) {
+        FontPickerDialog(
+            selectedFontId = settings.fontId,
+            onSelected = { font -> onSettingsChange { it.copy(fontId = font.id) } },
+            onDismiss = { showFontPicker = false },
+        )
+    }
 }
 
 @Composable
@@ -177,7 +261,6 @@ fun BorderSettingsContent(
     settings: PrintSettings,
     onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
 ) {
-    Text("选择样式", style = MaterialTheme.typography.labelLarge)
     BorderPicker(
         selected = settings.border.style,
         settings = settings.border,
@@ -259,6 +342,16 @@ fun LayoutSettingsContent(
         checked = settings.autoPaperLength,
         onCheckedChange = { checked -> onSettingsChange { it.copy(autoPaperLength = checked) } },
     )
+    if (settings.autoPaperLength) {
+        CompactNumberControl(
+            title = "自动长度目标",
+            value = settings.preferredAutoLengthMm,
+            unit = "mm",
+            valueRange = 100f..1500f,
+            step = 10f,
+            onValueChange = { value -> onSettingsChange { it.copy(preferredAutoLengthMm = value) } },
+        )
+    }
     if (!settings.autoPaperLength) {
         CompactNumberControl(
             title = "纸张长度",
@@ -305,91 +398,650 @@ fun LayoutSettingsContent(
 }
 
 @Composable
-private fun MoreSettingsContent(
+fun FooterSettingsContent(
     state: MainUiState,
     onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
-    onOpenSettings: () -> Unit,
-    onPrintTest: () -> Unit,
-    onPrintPolarityTest: () -> Unit,
 ) {
-    var showAdvanced by remember { mutableStateOf(false) }
-    CompactNumberControl(
-        title = "打印浓度",
-        value = state.settings.density.toFloat(),
-        unit = "",
-        valueRange = 0f..15f,
-        step = 1f,
-        decimals = 0,
-        onValueChange = { value -> onSettingsChange { it.copy(density = value.toInt()) } },
-    )
-    CompactNumberControl(
-        title = "打印速度",
-        value = state.settings.speedInchesPerSecond,
-        unit = "ips",
-        valueRange = 1f..6f,
-        step = 0.5f,
-        onValueChange = { value -> onSettingsChange { it.copy(speedInchesPerSecond = value) } },
-    )
-    Text("打印方向", style = MaterialTheme.typography.labelLarge)
-    ChoiceChips(
-        values = PrintDirection.entries,
-        selected = state.settings.printDirection,
-        label = { it.label },
-        onSelected = { direction -> onSettingsChange { it.copy(printDirection = direction) } },
-    )
+    var showFooterFontPicker by remember { mutableStateOf(false) }
+    var showPersonFontPicker by remember { mutableStateOf(false) }
+    Text("落款小标签", style = MaterialTheme.typography.labelLarge)
     SwitchRow(
-        title = "反转打印",
-        subtitle = "黑布白带正常情况下保持关闭",
-        checked = state.settings.reversePrinting,
-        onCheckedChange = { checked -> onSettingsChange { it.copy(reversePrinting = checked) } },
+        title = "启用落款标签",
+        subtitle = "独立排版并靠近页尾",
+        checked = state.settings.footerLabel.enabled,
+        onCheckedChange = { enabled ->
+            onSettingsChange { current -> current.copy(footerLabel = current.footerLabel.copy(enabled = enabled)) }
+        },
     )
-    OutlinedButton(
-        onClick = { showAdvanced = !showAdvanced },
-        modifier = Modifier.fillMaxWidth(),
-    ) { Text(if (showAdvanced) "收起高级 TSPL 参数" else "高级 TSPL 参数") }
-    if (showAdvanced) {
+    if (state.settings.footerLabel.enabled) {
+        PersonSettingsSection(
+            state = state,
+            onSettingsChange = onSettingsChange,
+            onOpenFontPicker = { showPersonFontPicker = true },
+        )
+        OutlinedTextField(
+            value = state.settings.footerLabel.text,
+            onValueChange = { value ->
+                onSettingsChange { current -> current.copy(footerLabel = current.footerLabel.copy(text = value)) }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("落款文字") },
+            supportingText = {
+                Text(
+                    if (state.settings.footerLabel.orientation == FooterTextOrientation.VERTICAL) {
+                        "每个输入行生成一列竖排文字"
+                    } else {
+                        "每个输入行生成一行横排文字"
+                    },
+                )
+            },
+            minLines = 2,
+            maxLines = 4,
+        )
+        OutlinedTextField(
+            value = state.settings.footerLabel.secondaryText,
+            onValueChange = { value ->
+                onSettingsChange { current -> current.copy(footerLabel = current.footerLabel.copy(secondaryText = value)) }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("附加文字（可选）") },
+            minLines = 1,
+            maxLines = 3,
+        )
+        Text("落款文字方向", style = MaterialTheme.typography.labelLarge)
+        ChoiceChips(
+            values = FooterTextOrientation.entries,
+            selected = state.settings.footerLabel.orientation,
+            label = { it.label },
+            onSelected = { orientation ->
+                onSettingsChange { current ->
+                    current.copy(footerLabel = current.footerLabel.copy(orientation = orientation))
+                }
+            },
+        )
+        FontSelectorRow(
+            fontId = state.settings.footerLabel.fontId,
+            onClick = { showFooterFontPicker = true },
+        )
         CompactNumberControl(
-            title = "BITMAP 分块",
-            value = state.settings.bitmapChunkSize.toFloat(),
-            unit = "bytes",
-            valueRange = 256f..4096f,
-            step = 256f,
+            title = "落款字号",
+            value = state.settings.footerLabel.fontSizeDots,
+            unit = "dots",
+            valueRange = 20f..120f,
+            step = 2f,
             decimals = 0,
             onValueChange = { value ->
-                onSettingsChange { it.copy(bitmapChunkSize = value.toInt()) }
+                onSettingsChange { current -> current.copy(footerLabel = current.footerLabel.copy(fontSizeDots = value)) }
             },
         )
         CompactNumberControl(
-            title = "分块间延迟",
-            value = state.settings.chunkDelayMs.toFloat(),
-            unit = "ms",
-            valueRange = 0f..50f,
-            step = 1f,
+            title = "落款字间距",
+            value = state.settings.footerLabel.spacingDots,
+            unit = "dots",
+            valueRange = 0f..120f,
+            step = 2f,
             decimals = 0,
             onValueChange = { value ->
-                onSettingsChange { it.copy(chunkDelayMs = value.toLong()) }
+                onSettingsChange { current -> current.copy(footerLabel = current.footerLabel.copy(spacingDots = value)) }
+            },
+        )
+        CompactNumberControl(
+            title = "与正文距离",
+            value = state.settings.footerLabel.distanceFromMainMm,
+            unit = "mm",
+            valueRange = 0f..100f,
+            step = 1f,
+            onValueChange = { value ->
+                onSettingsChange { current -> current.copy(footerLabel = current.footerLabel.copy(distanceFromMainMm = value)) }
+            },
+        )
+        CompactNumberControl(
+            title = "距页尾距离",
+            value = state.settings.footerLabel.bottomMarginMm,
+            unit = "mm",
+            valueRange = 0f..100f,
+            step = 1f,
+            onValueChange = { value ->
+                onSettingsChange { current -> current.copy(footerLabel = current.footerLabel.copy(bottomMarginMm = value)) }
+            },
+        )
+        Text("落款位置", style = MaterialTheme.typography.labelLarge)
+        ChoiceChips(
+            values = FooterLabelPosition.entries,
+            selected = state.settings.footerLabel.position,
+            label = { it.label },
+            onSelected = { position ->
+                onSettingsChange { current -> current.copy(footerLabel = current.footerLabel.copy(position = position)) }
+            },
+        )
+        Text("花朵装饰", style = MaterialTheme.typography.labelLarge)
+        SwitchRow(
+            title = "启用花朵装饰",
+            checked = state.settings.footerLabel.flower.enabled,
+            onCheckedChange = { enabled ->
+                onSettingsChange { current ->
+                    current.copy(
+                        footerLabel = current.footerLabel.copy(
+                            flower = current.footerLabel.flower.copy(enabled = enabled),
+                        ),
+                    )
+                }
+            },
+        )
+        if (state.settings.footerLabel.flower.enabled) {
+            FlowerStylePicker(
+                selected = state.settings.footerLabel.flower.style,
+                onSelected = { style ->
+                    onSettingsChange { current ->
+                        current.copy(
+                            footerLabel = current.footerLabel.copy(
+                                flower = current.footerLabel.flower.copy(style = style),
+                            ),
+                        )
+                    }
+                },
+            )
+            CompactNumberControl(
+                title = "花朵大小",
+                value = state.settings.footerLabel.flower.sizeMm,
+                unit = "mm",
+                valueRange = FlowerAdjustmentLimits.MIN_SIZE_MM..FlowerAdjustmentLimits.MAX_SIZE_MM,
+                step = 1f,
+                onValueChange = { value ->
+                    onSettingsChange { current ->
+                        current.copy(
+                            footerLabel = current.footerLabel.copy(
+                                flower = current.footerLabel.flower.copy(sizeMm = value),
+                            ),
+                        )
+                    }
+                },
+            )
+            CompactNumberControl(
+                title = "花朵水平微调",
+                value = state.settings.footerLabel.flower.offsetXmm,
+                unit = "mm",
+                valueRange = FlowerAdjustmentLimits.MIN_OFFSET_MM..FlowerAdjustmentLimits.MAX_OFFSET_MM,
+                step = 1f,
+                onValueChange = { value ->
+                    onSettingsChange { current ->
+                        current.copy(
+                            footerLabel = current.footerLabel.copy(
+                                flower = current.footerLabel.flower.copy(offsetXmm = value),
+                            ),
+                        )
+                    }
+                },
+            )
+            CompactNumberControl(
+                title = "花朵垂直微调",
+                value = state.settings.footerLabel.flower.offsetYmm,
+                unit = "mm",
+                valueRange = FlowerAdjustmentLimits.MIN_OFFSET_MM..FlowerAdjustmentLimits.MAX_OFFSET_MM,
+                step = 1f,
+                onValueChange = { value ->
+                    onSettingsChange { current ->
+                        current.copy(
+                            footerLabel = current.footerLabel.copy(
+                                flower = current.footerLabel.flower.copy(offsetYmm = value),
+                            ),
+                        )
+                    }
+                },
+            )
+            CompactNumberControl(
+                title = "花朵旋转",
+                value = state.settings.footerLabel.flower.rotationDegrees,
+                unit = "°",
+                valueRange = FlowerAdjustmentLimits.MIN_ROTATION_DEGREES..
+                    FlowerAdjustmentLimits.MAX_ROTATION_DEGREES,
+                step = 5f,
+                decimals = 0,
+                onValueChange = { value ->
+                    onSettingsChange { current ->
+                        current.copy(
+                            footerLabel = current.footerLabel.copy(
+                                flower = current.footerLabel.flower.copy(rotationDegrees = value),
+                            ),
+                        )
+                    }
+                },
+            )
+        }
+        HorizontalDivider()
+    }
+    CompactNumberControl(
+        title = "页尾留白",
+        value = state.settings.bottomMarginMm,
+        unit = "mm",
+        valueRange = 0f..100f,
+        step = 1f,
+        onValueChange = { value -> onSettingsChange { it.copy(bottomMarginMm = value) } },
+    )
+    Text("页尾裁切线", style = MaterialTheme.typography.labelLarge)
+    SwitchRow(
+        title = "启用页尾裁切辅助线",
+        subtitle = "只打印细白色剪裁参考线，不填充燕尾区域",
+        checked = state.settings.cutGuide.enabled,
+        onCheckedChange = { enabled ->
+            onSettingsChange { current -> current.copy(cutGuide = current.cutGuide.copy(enabled = enabled)) }
+        },
+    )
+    if (state.settings.cutGuide.enabled) {
+        Text("裁切样式", style = MaterialTheme.typography.labelLarge)
+        ChoiceChips(
+            values = listOf(CutGuideStyle.INWARD_V, CutGuideStyle.STRAIGHT),
+            selected = state.settings.cutGuide.style,
+            label = { it.label },
+            onSelected = { style ->
+                onSettingsChange { current -> current.copy(cutGuide = current.cutGuide.copy(style = style)) }
+            },
+        )
+        CutGuideMiniPreview(state.settings.cutGuide.style)
+        CompactNumberControl(
+            title = "距页尾",
+            value = state.settings.cutGuide.bottomOffsetMm,
+            unit = "mm",
+            valueRange = 1f..40f,
+            step = 1f,
+            onValueChange = { value ->
+                onSettingsChange { current -> current.copy(cutGuide = current.cutGuide.copy(bottomOffsetMm = value)) }
+            },
+        )
+        if (state.settings.cutGuide.style == CutGuideStyle.INWARD_V) {
+            CompactNumberControl(
+                title = "燕尾深度",
+                value = state.settings.cutGuide.notchDepthMm,
+                unit = "mm",
+                valueRange = 5f..60f,
+                step = 1f,
+                onValueChange = { value ->
+                    onSettingsChange { current -> current.copy(cutGuide = current.cutGuide.copy(notchDepthMm = value)) }
+                },
+            )
+            CompactNumberControl(
+                title = "左右边距",
+                value = state.settings.cutGuide.edgeInsetMm,
+                unit = "mm",
+                valueRange = 0f..20f,
+                step = 0.5f,
+                onValueChange = { value ->
+                    onSettingsChange { current -> current.copy(cutGuide = current.cutGuide.copy(edgeInsetMm = value)) }
+                },
+            )
+        }
+        CompactNumberControl(
+            title = "裁切线宽",
+            value = state.settings.cutGuide.lineWidthMm,
+            unit = "mm",
+            valueRange = 0.2f..1.5f,
+            step = 0.1f,
+            onValueChange = { value ->
+                onSettingsChange { current -> current.copy(cutGuide = current.cutGuide.copy(lineWidthMm = value)) }
             },
         )
     }
     HorizontalDivider()
-    Text("打印机测试", style = MaterialTheme.typography.labelLarge)
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        OutlinedButton(
-            onClick = onPrintPolarityTest,
-            enabled = !state.isPrinting,
-            modifier = Modifier.weight(1f),
-        ) { Text("极性测试") }
-        OutlinedButton(
-            onClick = onPrintTest,
-            enabled = !state.isPrinting,
-            modifier = Modifier.weight(1f),
-        ) { Text("完整测试") }
+    if (showFooterFontPicker) {
+        FontPickerDialog(
+            selectedFontId = state.settings.footerLabel.fontId,
+            onSelected = { font ->
+                onSettingsChange { current -> current.copy(footerLabel = current.footerLabel.copy(fontId = font.id)) }
+            },
+            onDismiss = { showFooterFontPicker = false },
+        )
     }
-    Button(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
-        Text("打开完整设置")
+    if (showPersonFontPicker) {
+        FontPickerDialog(
+            selectedFontId = state.settings.footerLabel.personFontId,
+            onSelected = { font ->
+                onSettingsChange { current ->
+                    current.copy(footerLabel = current.footerLabel.copy(personFontId = font.id))
+                }
+            },
+            onDismiss = { showPersonFontPicker = false },
+        )
+    }
+}
+
+@Composable
+private fun PersonSettingsSection(
+    state: MainUiState,
+    onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
+    onOpenFontPicker: () -> Unit,
+) {
+    val footer = state.settings.footerLabel
+    Text("姓名排列", style = MaterialTheme.typography.labelLarge)
+    ChoiceChips(
+        values = PersonLayout.entries,
+        selected = footer.personLayout,
+        label = { it.label },
+        onSelected = { layout ->
+            onSettingsChange { current ->
+                current.copy(footerLabel = current.footerLabel.copy(personLayout = layout))
+            }
+        },
+    )
+    Text(
+        if (footer.personLayout == PersonLayout.PARALLEL_COLUMNS) {
+            "每个人各占一列、列内竖排，并从同一顶部开始。"
+        } else {
+            "所有人员按顺序接成一列竖排。"
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Text("人员姓名（1～6 人）", style = MaterialTheme.typography.labelLarge)
+    footer.persons.forEachIndexed { index, person ->
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+            ),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text("人员 ${index + 1}", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = person.relation,
+                        onValueChange = { relation ->
+                            onSettingsChange { current ->
+                                val updated = current.footerLabel.persons.toMutableList().apply {
+                                    this[index] = this[index].copy(relation = relation)
+                                }
+                                current.copy(footerLabel = current.footerLabel.copy(persons = updated))
+                            }
+                        },
+                        modifier = Modifier.weight(0.38f),
+                        label = { Text("称谓") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = person.name,
+                        onValueChange = { name ->
+                            onSettingsChange { current ->
+                                val updated = current.footerLabel.persons.toMutableList().apply {
+                                    this[index] = this[index].copy(name = name)
+                                }
+                                current.copy(footerLabel = current.footerLabel.copy(persons = updated))
+                            }
+                        },
+                        modifier = Modifier.weight(0.62f),
+                        label = { Text("姓名") },
+                        singleLine = true,
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    TextButton(
+                        onClick = {
+                            onSettingsChange { current ->
+                                if (index == 0) current else {
+                                    val updated = current.footerLabel.persons.toMutableList()
+                                    val moved = updated.removeAt(index)
+                                    updated.add(index - 1, moved)
+                                    current.copy(footerLabel = current.footerLabel.copy(persons = updated))
+                                }
+                            }
+                        },
+                        enabled = index > 0,
+                    ) { Text("上移") }
+                    TextButton(
+                        onClick = {
+                            onSettingsChange { current ->
+                                if (index >= current.footerLabel.persons.lastIndex) current else {
+                                    val updated = current.footerLabel.persons.toMutableList()
+                                    val moved = updated.removeAt(index)
+                                    updated.add(index + 1, moved)
+                                    current.copy(footerLabel = current.footerLabel.copy(persons = updated))
+                                }
+                            }
+                        },
+                        enabled = index < footer.persons.lastIndex,
+                    ) { Text("下移") }
+                    TextButton(
+                        onClick = {
+                            onSettingsChange { current ->
+                                val updated = current.footerLabel.persons.toMutableList().apply {
+                                    if (index in indices) removeAt(index)
+                                }
+                                current.copy(footerLabel = current.footerLabel.copy(persons = updated))
+                            }
+                        },
+                    ) { Text("删除") }
+                }
+            }
+        }
+    }
+    if (footer.persons.size < PersonLayoutRules.MAX_PERSONS) {
+        TextButton(
+            onClick = {
+                onSettingsChange { current ->
+                    current.copy(
+                        footerLabel = current.footerLabel.copy(
+                            persons = current.footerLabel.persons + FooterPerson(),
+                        ),
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("+ 添加人员（最多 6 人）") }
+    }
+    if (footer.persons.isNotEmpty()) {
+        FontSelectorRow(
+            fontId = footer.personFontId,
+            label = "姓名字体",
+            onClick = onOpenFontPicker,
+        )
+        CompactNumberControl(
+            title = "姓名字号",
+            value = footer.personFontSizeDots,
+            unit = "dots",
+            valueRange = PersonLayoutRules.MIN_FONT_SIZE_DOTS..PersonLayoutRules.MAX_FONT_SIZE_DOTS,
+            step = 2f,
+            decimals = 0,
+            onValueChange = { value ->
+                onSettingsChange { current ->
+                    current.copy(footerLabel = current.footerLabel.copy(personFontSizeDots = value))
+                }
+            },
+        )
+        CompactNumberControl(
+            title = "姓名区域水平偏移",
+            value = footer.personGroupOffsetXMm,
+            unit = "mm",
+            valueRange = PersonLayoutRules.MIN_GROUP_OFFSET_MM..PersonLayoutRules.MAX_GROUP_OFFSET_MM,
+            step = 1f,
+            onValueChange = { value ->
+                onSettingsChange { current ->
+                    current.copy(footerLabel = current.footerLabel.copy(personGroupOffsetXMm = value))
+                }
+            },
+        )
+        CompactNumberControl(
+            title = "姓名区域垂直位置",
+            value = footer.personGroupOffsetYMm,
+            unit = "mm",
+            valueRange = PersonLayoutRules.MIN_GROUP_OFFSET_MM..PersonLayoutRules.MAX_GROUP_OFFSET_MM,
+            step = 1f,
+            onValueChange = { value ->
+                onSettingsChange { current ->
+                    current.copy(footerLabel = current.footerLabel.copy(personGroupOffsetYMm = value))
+                }
+            },
+        )
+        if (footer.personLayout == PersonLayout.PARALLEL_COLUMNS) {
+            CompactNumberControl(
+                title = "姓名列间距",
+                value = footer.personColumnGapMm,
+                unit = "mm",
+                valueRange = PersonLayoutRules.MIN_COLUMN_GAP_MM..PersonLayoutRules.MAX_COLUMN_GAP_MM,
+                step = 1f,
+                onValueChange = { value ->
+                    onSettingsChange { current ->
+                        current.copy(footerLabel = current.footerLabel.copy(personColumnGapMm = value))
+                    }
+                },
+            )
+            val availableWidthDots = PrintUnits.mmToDots(
+                state.preview?.mainAreaWidthMm ?: state.settings.paperWidthMm,
+            ).toFloat()
+            val resolved = PersonLayoutRules.resolveParallelColumns(
+                personCount = footer.persons.size.coerceAtLeast(1),
+                requestedFontSizeDots = footer.personFontSizeDots,
+                requestedColumnGapMm = footer.personColumnGapMm,
+                availableWidthDots = availableWidthDots,
+                fontWidthScale = FontRepository.resolve(footer.personFontId).textScaleX,
+            )
+            if (resolved.wasAutoReduced) {
+                Text(
+                    "当前人员较多，请减小姓名字号或列间距。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactToolContent(
+    selectedTool: EditorTool,
+    state: MainUiState,
+    onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
+) {
+    when (selectedTool) {
+        EditorTool.TEXT -> {
+            OutlinedTextField(
+                value = state.settings.text,
+                onValueChange = { text -> onSettingsChange { it.copy(text = text) } },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("挽联内容") },
+                minLines = 1,
+                maxLines = 2,
+            )
+            CompactNumberControl(
+                title = "字间距",
+                value = state.settings.characterSpacingDots,
+                unit = "dots",
+                valueRange = 0f..240f,
+                step = 2f,
+                decimals = 0,
+                onValueChange = { value -> onSettingsChange { it.copy(characterSpacingDots = value) } },
+            )
+        }
+        EditorTool.BORDER -> {
+            InfoValueRow("当前边框", state.settings.border.style.label)
+            ChoiceChips(
+                values = BorderPosition.entries,
+                selected = state.settings.border.position,
+                label = { it.label },
+                onSelected = { position ->
+                    onSettingsChange { current -> current.copy(border = current.border.copy(position = position)) }
+                },
+            )
+        }
+        EditorTool.LAYOUT -> {
+            CompactNumberControl(
+                title = "纸张宽度",
+                value = state.settings.paperWidthMm,
+                unit = "mm",
+                valueRange = 30f..110f,
+                step = 1f,
+                onValueChange = { value -> onSettingsChange { it.copy(paperWidthMm = value) } },
+            )
+            SwitchRow(
+                title = "自动纸长",
+                checked = state.settings.autoPaperLength,
+                onCheckedChange = { enabled -> onSettingsChange { it.copy(autoPaperLength = enabled) } },
+            )
+        }
+        EditorTool.FOOTER -> {
+            SwitchRow(
+                title = "落款标签",
+                checked = state.settings.footerLabel.enabled,
+                onCheckedChange = { enabled ->
+                    onSettingsChange { current -> current.copy(footerLabel = current.footerLabel.copy(enabled = enabled)) }
+                },
+            )
+            if (state.settings.footerLabel.enabled) {
+                Text("姓名排列", style = MaterialTheme.typography.labelLarge)
+                ChoiceChips(
+                    values = PersonLayout.entries,
+                    selected = state.settings.footerLabel.personLayout,
+                    label = { it.label },
+                    onSelected = { layout ->
+                        onSettingsChange { current ->
+                            current.copy(
+                                footerLabel = current.footerLabel.copy(personLayout = layout),
+                            )
+                        }
+                    },
+                )
+            }
+            InfoValueRow(
+                "裁切线",
+                if (state.settings.cutGuide.enabled) state.settings.cutGuide.style.label else "关闭",
+            )
+        }
+    }
+}
+
+@Composable
+private fun CutGuideMiniPreview(style: CutGuideStyle) {
+    val guideColor = Color.White
+    val edgeColor = Color(0xFF6F7471)
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(88.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.Black)
+            .padding(horizontal = 18.dp, vertical = 10.dp),
+    ) {
+        val left = 0f
+        val right = size.width
+        val bottom = size.height * 0.88f
+        drawLine(edgeColor, start = androidx.compose.ui.geometry.Offset(left, 0f), end = androidx.compose.ui.geometry.Offset(left, bottom))
+        drawLine(edgeColor, start = androidx.compose.ui.geometry.Offset(right, 0f), end = androidx.compose.ui.geometry.Offset(right, bottom))
+        when (style) {
+            CutGuideStyle.STRAIGHT -> drawLine(
+                color = guideColor,
+                start = androidx.compose.ui.geometry.Offset(left, bottom),
+                end = androidx.compose.ui.geometry.Offset(right, bottom),
+                strokeWidth = 2f,
+                cap = StrokeCap.Round,
+            )
+            CutGuideStyle.INWARD_V -> {
+                val centerTip = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height * 0.22f)
+                drawLine(
+                    color = guideColor,
+                    start = androidx.compose.ui.geometry.Offset(left, bottom),
+                    end = centerTip,
+                    strokeWidth = 2f,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = guideColor,
+                    start = androidx.compose.ui.geometry.Offset(right, bottom),
+                    end = centerTip,
+                    strokeWidth = 2f,
+                    cap = StrokeCap.Round,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FontSelectorRow(fontId: String, label: String = "字体", onClick: () -> Unit) {
+    val definition = FontRepository.resolve(fontId)
+    TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("${definition.displayName}  ›", fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 

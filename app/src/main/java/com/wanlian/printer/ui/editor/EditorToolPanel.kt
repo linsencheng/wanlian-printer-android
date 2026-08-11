@@ -20,28 +20,29 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.wanlian.printer.MainUiState
 import com.wanlian.printer.model.PrintSettings
-import com.wanlian.printer.printing.RenderedBitmap
 
 /** Fixed compact panel used only for tablet and wide landscape layouts. */
 @Composable
 fun EditorToolPanel(
-    settings: PrintSettings,
-    rendered: RenderedBitmap?,
+    state: MainUiState,
     onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var selectedTool by remember { mutableStateOf(EditorTool.TEXT) }
     Card(
         modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        ),
     ) {
         Column(Modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                listOf(EditorTool.TEXT, EditorTool.BORDER, EditorTool.LAYOUT).forEach { tool ->
+                EditorTool.entries.forEach { tool ->
                     FilterChip(
                         selected = selectedTool == tool,
                         onClick = { selectedTool = tool },
@@ -58,10 +59,10 @@ fun EditorToolPanel(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 when (selectedTool) {
-                    EditorTool.TEXT -> TextSettingsContent(settings, onSettingsChange)
-                    EditorTool.BORDER -> BorderSettingsContent(settings, onSettingsChange)
-                    EditorTool.LAYOUT -> LayoutSettingsContent(settings, rendered, onSettingsChange)
-                    EditorTool.MORE -> Unit
+                    EditorTool.TEXT -> TextSettingsContent(state.settings, onSettingsChange)
+                    EditorTool.BORDER -> BorderSettingsContent(state.settings, onSettingsChange)
+                    EditorTool.LAYOUT -> LayoutSettingsContent(state.settings, state.preview, onSettingsChange)
+                    EditorTool.FOOTER -> FooterSettingsContent(state, onSettingsChange)
                 }
             }
         }

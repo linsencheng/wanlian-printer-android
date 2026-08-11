@@ -20,9 +20,12 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.core.content.ContextCompat
+import com.wanlian.printer.BuildConfig
 import com.wanlian.printer.model.BluetoothTransport
 import com.wanlian.printer.model.ConnectionStatus
+import com.wanlian.printer.model.PrinterConnectionInfo
 import com.wanlian.printer.model.PrinterDevice
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -64,6 +67,9 @@ class BluetoothManager(context: Context) {
 
     private val _currentDevice = MutableStateFlow<PrinterDevice?>(null)
     val currentDevice: StateFlow<PrinterDevice?> = _currentDevice.asStateFlow()
+
+    private val _connectionInfo = MutableStateFlow<PrinterConnectionInfo?>(null)
+    val connectionInfo: StateFlow<PrinterConnectionInfo?> = _connectionInfo.asStateFlow()
 
     private val _lastError = MutableStateFlow<String?>(null)
     val lastError: StateFlow<String?> = _lastError.asStateFlow()
@@ -161,7 +167,10 @@ class BluetoothManager(context: Context) {
         if (BluetoothTransport.CLASSIC in printer.transports) {
             try {
                 classicSocket = connectClassic(printer)
-                _connectionStatus.value = ConnectionStatus.CONNECTED
+                markConnected(
+                    printer = printer,
+                    info = PrinterConnectionInfo(transport = BluetoothTransport.CLASSIC),
+                )
                 return@withLock
             } catch (error: Throwable) {
                 lastFailure = error
@@ -171,7 +180,19 @@ class BluetoothManager(context: Context) {
         if (BluetoothTransport.BLE in printer.transports) {
             try {
                 bleEndpoint = connectBle(printer)
-                _connectionStatus.value = ConnectionStatus.CONNECTED
+                val characteristic = checkNotNull(bleEndpoint).characteristic
+                val properties = characteristic.properties
+                markConnected(
+                    printer = printer,
+                    info = PrinterConnectionInfo(
+                        transport = BluetoothTransport.BLE,
+                        serviceUuid = characteristic.service?.uuid?.toString(),
+                        characteristicUuid = characteristic.uuid.toString(),
+                        supportsWrite = properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0,
+                        supportsWriteWithoutResponse = properties and
+                            BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0,
+                    ),
+                )
                 return@withLock
             } catch (error: Throwable) {
                 lastFailure = error
@@ -323,7 +344,28 @@ class BluetoothManager(context: Context) {
             runCatching { endpoint.gatt.close() }
         }
         bleEndpoint = null
+        _connectionInfo.value = null
         if (updateState) _connectionStatus.value = ConnectionStatus.DISCONNECTED
+    }
+
+    private fun markConnected(printer: PrinterDevice, info: PrinterConnectionInfo) {
+        _currentDevice.value = printer.copy(transports = setOf(info.transport))
+        _connectionInfo.value = info
+        _connectionStatus.value = ConnectionStatus.CONNECTED
+        if (BuildConfig.DEBUG) {
+            Log.i(
+                LOG_TAG,
+                buildString {
+                    appendLine("Printer connected")
+                    appendLine("Name: ${printer.displayName}")
+                    appendLine("Address: ${printer.address}")
+                    appendLine("Transport: ${info.transport.connectionLabel}")
+                    appendLine("Service UUID: ${info.serviceUuid ?: "N/A"}")
+                    appendLine("Characteristic UUID: ${info.characteristicUuid ?: "N/A"}")
+                    append("Characteristic properties: ${info.characteristicPropertiesLabel}")
+                },
+            )
+        }
     }
 
     private fun handleConnectionLost(message: String) {
@@ -340,19 +382,27 @@ class BluetoothManager(context: Context) {
         rssi: Int? = null,
     ) {
         _devices.update { oldList ->
-            val existing = oldList.firstOrNull { it.address == address }
+            val existing = oldList.firstOrNull {
+                it.address == address && it.transports == setOf(transport)
+            }
             val merged = if (existing == null) {
                 PrinterDevice(name, address, setOf(transport), bonded, rssi)
             } else {
                 existing.copy(
                     name = name.ifBlank { existing.name },
-                    transports = existing.transports + transport,
                     bonded = existing.bonded || bonded,
                     rssi = rssi ?: existing.rssi,
                 )
             }
-            (oldList.filterNot { it.address == address } + merged)
-                .sortedWith(compareByDescending<PrinterDevice> { it.bonded }.thenBy { it.displayName })
+            (
+                oldList.filterNot {
+                    it.address == address && it.transports == setOf(transport)
+                } + merged
+            ).sortedWith(
+                compareByDescending<PrinterDevice> { it.bonded }
+                    .thenBy { it.displayName }
+                    .thenBy { it.transports.singleOrNull()?.name.orEmpty() },
+            )
         }
     }
 
@@ -522,6 +572,7 @@ class BluetoothManager(context: Context) {
     )
 
     companion object {
+        private const val LOG_TAG = "BluetoothManager"
         private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
         private const val SCAN_DURATION_MS = 12_000L
         private const val CONNECTION_TIMEOUT_MS = 15_000L
