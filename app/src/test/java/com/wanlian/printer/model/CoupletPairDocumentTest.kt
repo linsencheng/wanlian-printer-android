@@ -113,25 +113,34 @@ class CoupletPairDocumentTest {
     }
 
     @Test
-    fun `left and right closing offsets remain independent`() {
-        val original = CoupletPairDocument(
+    fun `selected side updates and prints left plus eight and right minus four independently`() {
+        var document = CoupletPairDocument(
             left = PrintSettings(
                 text = "沉痛悼念外祖母  千古",
-                closingTextBlock = ClosingTextBlockSettings(offsetYMm = -8f),
             ),
             right = PrintSettings(
                 text = "愚侄夫妇率全家  叩挽",
-                closingTextBlock = ClosingTextBlockSettings(offsetYMm = 6f),
             ),
         )
-        val updated = original.replaceSelected(
-            original.left.copy(
-                closingTextBlock = original.left.closingTextBlock.copy(offsetYMm = -12f),
+        document = document.replaceSelected(
+            document.selectedSettings.copy(
+                closingTextBlock = document.selectedSettings.closingTextBlock.copy(offsetYMm = 8f),
             ),
         )
+        document = document.select(CoupletSide.RIGHT)
+        assertEquals(0f, document.selectedSettings.closingTextBlock.offsetYMm, 0.001f)
+        document = document.replaceSelected(
+            document.selectedSettings.copy(
+                closingTextBlock = document.selectedSettings.closingTextBlock.copy(offsetYMm = -4f),
+            ),
+        )
+        val printJobs = PairPrintPlan.jobs(document)
 
-        assertEquals(-12f, updated.left.closingTextBlock.offsetYMm, 0.001f)
-        assertEquals(6f, updated.right.closingTextBlock.offsetYMm, 0.001f)
+        assertEquals(8f, document.left.closingTextBlock.offsetYMm, 0.001f)
+        assertEquals(-4f, document.right.closingTextBlock.offsetYMm, 0.001f)
+        assertEquals(-4f, document.selectedSettings.closingTextBlock.offsetYMm, 0.001f)
+        assertEquals(8f, printJobs[0].settings.closingTextBlock.offsetYMm, 0.001f)
+        assertEquals(-4f, printJobs[1].settings.closingTextBlock.offsetYMm, 0.001f)
     }
 
     @Test

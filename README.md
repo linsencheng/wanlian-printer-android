@@ -32,13 +32,18 @@
 生成的 Debug APK：
 
 ```text
-app/build/outputs/apk/debug/app-debug.apk
+app/build/outputs/apk/debug/WanLianPrint-<versionName>-debug.apk
 ```
+
+文件名会自动包含构建版本号，例如：`WanLianPrint-1.0.20260812.120000-debug.apk`。
 
 安装到已连接的 Android 设备：
 
 ```powershell
-adb install -r .\app\build\outputs\apk\debug\app-debug.apk
+$apk = Get-ChildItem .\app\build\outputs\apk\debug\WanLianPrint-*-debug.apk |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+adb install -r $apk.FullName
 ```
 
 ## 使用
