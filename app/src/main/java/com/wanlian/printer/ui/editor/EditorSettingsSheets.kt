@@ -44,9 +44,11 @@ import com.wanlian.printer.model.ClosingTextBlockRules
 import com.wanlian.printer.model.CutGuideStyle
 import com.wanlian.printer.model.FlowerStyle
 import com.wanlian.printer.model.FlowerAdjustmentLimits
+import com.wanlian.printer.model.FooterLabelAdjustmentLimits
 import com.wanlian.printer.model.FooterLabelPosition
 import com.wanlian.printer.model.FooterTextOrientation
 import com.wanlian.printer.model.FooterPerson
+import com.wanlian.printer.model.DocumentMode
 import com.wanlian.printer.model.PersonBlockHorizontalPreset
 import com.wanlian.printer.model.PersonBlockSettings
 import com.wanlian.printer.model.PersonLayout
@@ -428,6 +430,13 @@ fun FooterSettingsContent(
 ) {
     var showFooterFontPicker by remember { mutableStateOf(false) }
     Text("落款小标签", style = MaterialTheme.typography.labelLarge)
+    if (state.documentMode == DocumentMode.PAIR) {
+        Text(
+            text = "当前编辑：${state.pairDocument?.selectedSide?.label ?: "左联"}落款",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
     SwitchRow(
         title = "启用落款标签",
         subtitle = "独立排版并靠近页尾",
@@ -501,6 +510,24 @@ fun FooterSettingsContent(
             decimals = 0,
             onValueChange = { value ->
                 onSettingsChange { current -> current.copy(footerLabel = current.footerLabel.copy(spacingDots = value)) }
+            },
+        )
+        CompactNumberControl(
+            title = "落款上下偏移",
+            value = state.settings.footerLabel.offsetYMm,
+            unit = "mm",
+            valueRange = FooterLabelAdjustmentLimits.MIN_OFFSET_Y_MM..
+                FooterLabelAdjustmentLimits.MAX_OFFSET_Y_MM,
+            step = 1f,
+            decimals = 1,
+            onValueChange = { value ->
+                onSettingsChange { current ->
+                    current.copy(
+                        footerLabel = current.footerLabel.copy(
+                            offsetYMm = FooterLabelAdjustmentLimits.clampOffsetYMm(value),
+                        ),
+                    )
+                }
             },
         )
         CompactNumberControl(

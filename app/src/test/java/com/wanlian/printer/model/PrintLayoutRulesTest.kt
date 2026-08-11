@@ -24,6 +24,58 @@ class PrintLayoutRulesTest {
     }
 
     @Test
+    fun `footer label vertical offset supports fifty millimeters in both directions`() {
+        assertEquals(
+            FooterLabelAdjustmentLimits.MIN_OFFSET_Y_MM,
+            FooterLabelAdjustmentLimits.clampOffsetYMm(-80f),
+            0.001f,
+        )
+        assertEquals(
+            FooterLabelAdjustmentLimits.MAX_OFFSET_Y_MM,
+            FooterLabelAdjustmentLimits.clampOffsetYMm(80f),
+            0.001f,
+        )
+    }
+
+    @Test
+    fun `footer label top resolves the requested offset and clamps inside paper`() {
+        val baseTop = 500f
+        assertEquals(
+            baseTop + PrintUnits.mmToDots(20f),
+            FooterLabelPositionRules.resolveTopDots(
+                baseTopDots = baseTop,
+                offsetYMm = 20f,
+                blockHeightDots = 100f,
+                safeTopDots = 100f,
+                safeBottomDots = 1200f,
+            ),
+            0.001f,
+        )
+        assertEquals(
+            100f,
+            FooterLabelPositionRules.resolveTopDots(
+                baseTopDots = 200f,
+                offsetYMm = -50f,
+                blockHeightDots = 100f,
+                safeTopDots = 100f,
+                safeBottomDots = 1200f,
+            ),
+            0.001f,
+        )
+        assertEquals(
+            900f,
+            FooterLabelPositionRules.resolveTopDots(
+                baseTopDots = 800f,
+                offsetYMm = 50f,
+                blockHeightDots = 100f,
+                safeTopDots = 100f,
+                safeBottomDots = 1000f,
+            ),
+            0.001f,
+        )
+    }
+
+    @Test
     fun `disabled cut guide produces no preview or print-mask segments`() {
         val settings = CutGuideSettings(enabled = false)
         assertEquals(0f, PrintLayoutRules.cutGuideReserveMm(settings), 0.001f)

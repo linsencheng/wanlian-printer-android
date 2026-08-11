@@ -10,6 +10,7 @@ import com.wanlian.printer.model.BorderPosition
 import com.wanlian.printer.model.BorderTemplate
 import com.wanlian.printer.model.ClosingTextBlockRules
 import com.wanlian.printer.model.CoupletPairDocument
+import com.wanlian.printer.model.FooterLabelPositionRules
 import com.wanlian.printer.model.PairLayoutRules
 import com.wanlian.printer.model.PersonPlacementMode
 import com.wanlian.printer.model.PrintSettings
@@ -177,12 +178,21 @@ class BitmapRenderer(
         }.coerceIn(1, MAX_BITMAP_HEIGHT_DOTS)
 
         val reservedBelowFooter = footerBottomMargin + bottomMargin + cutGuideReserve
-        val footerTop = if (settings.footerLabel.enabled) {
+        val baseFooterTop = if (settings.footerLabel.enabled) {
             val preferredFooterTop = heightDots - reservedBelowFooter - footerMetrics.totalHeightDots
             val minimumFooterTop = mainContentBottom + footerDistance
             max(preferredFooterTop, minimumFooterTop)
         } else {
             null
+        }
+        val footerTop = baseFooterTop?.let { baseTop ->
+            FooterLabelPositionRules.resolveTopDots(
+                baseTopDots = baseTop,
+                offsetYMm = settings.footerLabel.offsetYMm,
+                blockHeightDots = footerMetrics.totalHeightDots,
+                safeTopDots = mainContentBottom.toFloat(),
+                safeBottomDots = (heightDots - cutGuideReserve).toFloat(),
+            )
         }
         val personSafeBottom = (heightDots - bottomMargin).toFloat()
             .coerceAtLeast(topMargin.toFloat() + 1f)

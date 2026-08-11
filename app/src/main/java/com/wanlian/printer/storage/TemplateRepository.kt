@@ -280,6 +280,7 @@ class TemplateRepository(context: Context) {
         put("spacingDots", settings.spacingDots)
         put("distanceFromMainMm", settings.distanceFromMainMm)
         put("bottomMarginMm", settings.bottomMarginMm)
+        put("offsetYMm", settings.offsetYMm)
         put("position", settings.position.name)
         put("orientation", settings.orientation.name)
         put("flower", flowerToJson(settings.flower))
@@ -301,6 +302,10 @@ class TemplateRepository(context: Context) {
             bottomMarginMm = json.optDouble(
                 "bottomMarginMm",
                 defaults.bottomMarginMm.toDouble(),
+            ).toFloat(),
+            offsetYMm = json.optDouble(
+                "offsetYMm",
+                defaults.offsetYMm.toDouble(),
             ).toFloat(),
             position = enumOrDefault(json.optString("position"), defaults.position),
             orientation = enumOrDefault(json.optString("orientation"), defaults.orientation),

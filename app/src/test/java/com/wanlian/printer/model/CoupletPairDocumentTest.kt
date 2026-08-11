@@ -35,7 +35,7 @@ class CoupletPairDocumentTest {
     }
 
     @Test
-    fun `shared footer layout update applies cut guide and flower to both sides`() {
+    fun `shared footer coordination keeps cut guide shared but footer labels independent`() {
         val pair = CoupletPairDocument.fromSingle(PrintSettings())
         val selected = pair.left.copy(
             cutGuide = pair.left.cutGuide.copy(enabled = true, notchDepthMm = 31f),
@@ -45,7 +45,7 @@ class CoupletPairDocumentTest {
         )
         val updated = pair.replaceSelected(selected)
         assertEquals(updated.left.cutGuide, updated.right.cutGuide)
-        assertEquals(updated.left.footerLabel.flower, updated.right.footerLabel.flower)
+        assertNotEquals(updated.left.footerLabel.flower, updated.right.footerLabel.flower)
     }
 
     @Test
@@ -141,6 +141,53 @@ class CoupletPairDocumentTest {
         assertEquals(-4f, document.selectedSettings.closingTextBlock.offsetYMm, 0.001f)
         assertEquals(8f, printJobs[0].settings.closingTextBlock.offsetYMm, 0.001f)
         assertEquals(-4f, printJobs[1].settings.closingTextBlock.offsetYMm, 0.001f)
+    }
+
+    @Test
+    fun `selected side keeps every left and right footer label setting independent`() {
+        var document = CoupletPairDocument.fromSingle(PrintSettings()).copy(
+            right = PrintSettings(footerLabel = FooterLabelSettings(text = "右联落款")),
+        )
+        document = document.replaceSelected(
+            document.selectedSettings.copy(
+                footerLabel = document.selectedSettings.footerLabel.copy(
+                    text = "左联落款",
+                    fontId = "song",
+                    fontSizeDots = 72f,
+                    spacingDots = 18f,
+                    distanceFromMainMm = 28f,
+                    bottomMarginMm = 34f,
+                    offsetYMm = 35f,
+                    position = FooterLabelPosition.LEFT,
+                ),
+            ),
+        )
+        document = document.select(CoupletSide.RIGHT)
+        assertEquals(0f, document.selectedSettings.footerLabel.offsetYMm, 0.001f)
+        document = document.replaceSelected(
+            document.selectedSettings.copy(
+                footerLabel = document.selectedSettings.footerLabel.copy(
+                    text = "右联新落款",
+                    fontId = "hei",
+                    fontSizeDots = 96f,
+                    spacingDots = 32f,
+                    distanceFromMainMm = 46f,
+                    bottomMarginMm = 52f,
+                    offsetYMm = -42f,
+                    position = FooterLabelPosition.RIGHT,
+                ),
+            ),
+        )
+        val printJobs = PairPrintPlan.jobs(document)
+
+        assertEquals("左联落款", document.left.footerLabel.text)
+        assertEquals("右联新落款", document.right.footerLabel.text)
+        assertEquals(35f, document.left.footerLabel.offsetYMm, 0.001f)
+        assertEquals(-42f, document.right.footerLabel.offsetYMm, 0.001f)
+        assertEquals(72f, document.left.footerLabel.fontSizeDots, 0.001f)
+        assertEquals(96f, document.right.footerLabel.fontSizeDots, 0.001f)
+        assertEquals(35f, printJobs[0].settings.footerLabel.offsetYMm, 0.001f)
+        assertEquals(-42f, printJobs[1].settings.footerLabel.offsetYMm, 0.001f)
     }
 
     @Test

@@ -9,10 +9,37 @@ data class FooterLabelSettings(
     val spacingDots: Float = 8f,
     val distanceFromMainMm: Float = 12f,
     val bottomMarginMm: Float = 12f,
+    val offsetYMm: Float = 0f,
     val position: FooterLabelPosition = FooterLabelPosition.CENTER,
     val orientation: FooterTextOrientation = FooterTextOrientation.VERTICAL,
     val flower: FlowerSettings = FlowerSettings(),
 )
+
+object FooterLabelAdjustmentLimits {
+    const val MIN_OFFSET_Y_MM = -50f
+    const val MAX_OFFSET_Y_MM = 50f
+
+    fun clampOffsetYMm(value: Float): Float = value.coerceIn(
+        MIN_OFFSET_Y_MM,
+        MAX_OFFSET_Y_MM,
+    )
+}
+
+object FooterLabelPositionRules {
+    fun resolveTopDots(
+        baseTopDots: Float,
+        offsetYMm: Float,
+        blockHeightDots: Float,
+        safeTopDots: Float,
+        safeBottomDots: Float,
+    ): Float {
+        val requestedTop = baseTopDots + PrintUnits.mmToDots(
+            FooterLabelAdjustmentLimits.clampOffsetYMm(offsetYMm),
+        )
+        val maximumTop = (safeBottomDots - blockHeightDots).coerceAtLeast(safeTopDots)
+        return requestedTop.coerceIn(safeTopDots, maximumTop)
+    }
+}
 
 enum class FooterTextOrientation(val label: String) {
     VERTICAL("竖排"),
