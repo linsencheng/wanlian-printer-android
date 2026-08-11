@@ -41,9 +41,9 @@ data class CoupletPairDocument(
     }
 
     private fun synchronizeSharedSettings(source: PrintSettings, target: PrintSettings): PrintSettings {
-        // Footer labels are always side-local. In pair mode, selectedSide must control every
-        // inscription field independently; sharedFooterLayout remains for the existing person
-        // block and cut-guide coordination only.
+        // Every footer setting is side-local. In pair mode, selectedSide controls inscription,
+        // flower, page-bottom spacing and cut-guide state independently. The legacy
+        // sharedFooterLayout flag remains only for person-block style coordination.
         val sideLocalFooter = target.footerLabel
         val sharedPersonBlock = if (sharedFooterLayout) {
             target.personBlock.copy(
@@ -63,11 +63,11 @@ data class CoupletPairDocument(
             paperLengthMm = source.paperLengthMm,
             preferredAutoLengthMm = source.preferredAutoLengthMm,
             topMarginMm = source.topMarginMm,
-            bottomMarginMm = source.bottomMarginMm,
+            bottomMarginMm = target.bottomMarginMm,
             border = if (sharedBorderSettings) source.border else target.border,
             personBlock = sharedPersonBlock,
             footerLabel = sideLocalFooter,
-            cutGuide = if (sharedFooterLayout) source.cutGuide else target.cutGuide,
+            cutGuide = target.cutGuide,
             density = source.density,
             speedInchesPerSecond = source.speedInchesPerSecond,
             threshold = source.threshold,

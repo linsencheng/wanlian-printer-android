@@ -531,24 +531,29 @@ fun FooterSettingsContent(
             },
         )
         CompactNumberControl(
-            title = "与正文距离",
+            title = "与正文最小距离",
             value = state.settings.footerLabel.distanceFromMainMm,
             unit = "mm",
-            valueRange = 0f..100f,
+            valueRange = 0f..300f,
             step = 1f,
             onValueChange = { value ->
                 onSettingsChange { current -> current.copy(footerLabel = current.footerLabel.copy(distanceFromMainMm = value)) }
             },
         )
         CompactNumberControl(
-            title = "距页尾距离",
+            title = "距页尾基准距离",
             value = state.settings.footerLabel.bottomMarginMm,
             unit = "mm",
-            valueRange = 0f..100f,
+            valueRange = 0f..300f,
             step = 1f,
             onValueChange = { value ->
                 onSettingsChange { current -> current.copy(footerLabel = current.footerLabel.copy(bottomMarginMm = value)) }
             },
+        )
+        Text(
+            "正文距离限定最上边界；页尾距离确定基准位置；上下偏移用于在安全范围内微调。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text("落款位置", style = MaterialTheme.typography.labelLarge)
         ChoiceChips(

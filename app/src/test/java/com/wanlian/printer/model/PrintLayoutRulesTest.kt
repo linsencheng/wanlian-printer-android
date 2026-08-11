@@ -38,41 +38,58 @@ class PrintLayoutRulesTest {
     }
 
     @Test
-    fun `footer label top resolves the requested offset and clamps inside paper`() {
-        val baseTop = 500f
-        assertEquals(
-            baseTop + PrintUnits.mmToDots(20f),
-            FooterLabelPositionRules.resolveTopDots(
-                baseTopDots = baseTop,
-                offsetYMm = 20f,
-                blockHeightDots = 100f,
-                safeTopDots = 100f,
-                safeBottomDots = 1200f,
-            ),
-            0.001f,
+    fun `zero body distance still allows footer offset to move upward through real free space`() {
+        val layout = FooterBlockLayoutEngine.layout(
+            mainContentBottomDots = 200f,
+            paperHeightDots = 1200f,
+            blockHeightDots = 100f,
+            distanceFromMainMm = 0f,
+            distanceFromPageEndMm = 10f,
+            offsetYMm = -20f,
+            pageBottomSafetyDots = 40f,
         )
-        assertEquals(
-            100f,
-            FooterLabelPositionRules.resolveTopDots(
-                baseTopDots = 200f,
-                offsetYMm = -50f,
-                blockHeightDots = 100f,
-                safeTopDots = 100f,
-                safeBottomDots = 1200f,
-            ),
-            0.001f,
+
+        assertEquals(820f, layout.topDots, 0.001f)
+        assertTrue(layout.topDots > layout.minimumTopDots)
+    }
+
+    @Test
+    fun `footer offset stops only at the actual body safety boundary`() {
+        val layout = FooterBlockLayoutEngine.layout(
+            mainContentBottomDots = 320f,
+            paperHeightDots = 900f,
+            blockHeightDots = 100f,
+            distanceFromMainMm = 0f,
+            distanceFromPageEndMm = 10f,
+            offsetYMm = -50f,
+            pageBottomSafetyDots = 40f,
         )
-        assertEquals(
-            900f,
-            FooterLabelPositionRules.resolveTopDots(
-                baseTopDots = 800f,
-                offsetYMm = 50f,
-                blockHeightDots = 100f,
-                safeTopDots = 100f,
-                safeBottomDots = 1000f,
-            ),
-            0.001f,
+
+        assertEquals(320f, layout.topDots, 0.001f)
+    }
+
+    @Test
+    fun `page end distance changes footer anchor when legal space exists`() {
+        val nearEnd = FooterBlockLayoutEngine.layout(
+            mainContentBottomDots = 100f,
+            paperHeightDots = 1200f,
+            blockHeightDots = 100f,
+            distanceFromMainMm = 0f,
+            distanceFromPageEndMm = 5f,
+            offsetYMm = 0f,
+            pageBottomSafetyDots = 40f,
         )
+        val farFromEnd = FooterBlockLayoutEngine.layout(
+            mainContentBottomDots = 100f,
+            paperHeightDots = 1200f,
+            blockHeightDots = 100f,
+            distanceFromMainMm = 0f,
+            distanceFromPageEndMm = 35f,
+            offsetYMm = 0f,
+            pageBottomSafetyDots = 40f,
+        )
+
+        assertEquals(PrintUnits.mmToDots(30f).toFloat(), nearEnd.topDots - farFromEnd.topDots, 0.001f)
     }
 
     @Test
