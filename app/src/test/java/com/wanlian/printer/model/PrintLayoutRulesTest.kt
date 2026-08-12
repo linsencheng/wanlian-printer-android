@@ -6,6 +6,14 @@ import org.junit.Test
 
 class PrintLayoutRulesTest {
     @Test
+    fun `negative character spacing reduces glyph advance and content height`() {
+        assertEquals(-240f, CharacterSpacingRules.clamp(-999f), 0.001f)
+        assertEquals(24f, CharacterSpacingRules.glyphAdvanceDots(44f, -20f), 0.001f)
+        assertEquals(92f, CharacterSpacingRules.contentExtentDots(44f, 3, -20f), 0.001f)
+        assertEquals(1f, CharacterSpacingRules.glyphAdvanceDots(44f, -240f), 0.001f)
+    }
+
+    @Test
     fun `auto length raises 700 mm to preferred 991 mm`() {
         assertEquals(991f, PrintLayoutRules.resolveAutoLengthMm(700f), 0.001f)
     }

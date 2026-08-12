@@ -127,6 +127,20 @@ class CoupletPairDocumentTest {
     }
 
     @Test
+    fun `left and right negative body spacing remain independent in pair print jobs`() {
+        var document = CoupletPairDocument.fromSingle(
+            PrintSettings(characterSpacingDots = PrintLayoutRules.MIN_CHARACTER_SPACING_DOTS),
+        ).select(CoupletSide.RIGHT)
+        document = document.replaceSelected(
+            document.right.copy(characterSpacingDots = -80f),
+        )
+
+        val jobs = PairPrintPlan.jobs(document)
+        assertEquals(-240f, jobs[0].settings.characterSpacingDots, 0.001f)
+        assertEquals(-80f, jobs[1].settings.characterSpacingDots, 0.001f)
+    }
+
+    @Test
     fun `selected side updates and prints left plus eight and right minus four independently`() {
         var document = CoupletPairDocument(
             left = PrintSettings(

@@ -116,6 +116,24 @@ class PersonBlockLayoutEngineTest {
         assertTrue(result.bounds.bottom <= 1600f)
     }
 
+    @Test
+    fun `negative name spacing moves adjacent glyphs closer together`() {
+        val result = layout(
+            PersonBlockSettings(
+                enabled = true,
+                persons = listOf(FooterPerson(relation = "", name = "夏凡", id = "single")),
+                layout = PersonLayout.PARALLEL_COLUMNS,
+                placementMode = PersonPlacementMode.SIDE_OVERLAY,
+                fontSizeDots = 72f,
+                characterSpacingDots = -20f,
+            ),
+        )
+
+        val baselines = result.coordinates.glyphs.map { it.baselineY }
+        assertEquals(24f, baselines[1] - baselines[0], 0.001f)
+        assertTrue(baselines[1] - baselines[0] < 44f)
+    }
+
     private fun layout(
         settings: PersonBlockSettings,
         inlineTop: Float? = null,

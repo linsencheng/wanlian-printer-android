@@ -2,8 +2,28 @@ package com.wanlian.printer.model
 
 import kotlin.math.max
 
-object PrintLayoutRules {
+object CharacterSpacingRules {
+    const val MIN_CHARACTER_SPACING_DOTS = -240f
     const val MAX_CHARACTER_SPACING_DOTS = 600f
+
+    fun clamp(spacingDots: Float): Float = spacingDots.coerceIn(
+        MIN_CHARACTER_SPACING_DOTS,
+        MAX_CHARACTER_SPACING_DOTS,
+    )
+
+    fun glyphAdvanceDots(glyphExtentDots: Float, spacingDots: Float): Float =
+        (glyphExtentDots.coerceAtLeast(1f) + clamp(spacingDots)).coerceAtLeast(1f)
+
+    fun contentExtentDots(glyphExtentDots: Float, unitCount: Int, spacingDots: Float): Float {
+        if (unitCount <= 0) return 0f
+        return glyphExtentDots.coerceAtLeast(1f) +
+            glyphAdvanceDots(glyphExtentDots, spacingDots) * (unitCount - 1)
+    }
+}
+
+object PrintLayoutRules {
+    const val MIN_CHARACTER_SPACING_DOTS = CharacterSpacingRules.MIN_CHARACTER_SPACING_DOTS
+    const val MAX_CHARACTER_SPACING_DOTS = CharacterSpacingRules.MAX_CHARACTER_SPACING_DOTS
     const val DEFAULT_PREFERRED_AUTO_LENGTH_MM = 991f
 
     fun resolveAutoLengthMm(

@@ -1,5 +1,6 @@
 package com.wanlian.printer.printing
 
+import com.wanlian.printer.model.CharacterSpacingRules
 import com.wanlian.printer.model.PersonBlockSettings
 import com.wanlian.printer.model.PersonPlacementMode
 import com.wanlian.printer.model.PersonLayout
@@ -68,7 +69,7 @@ object PersonBlockLayoutEngine {
             }
         }.coerceAtLeast(1)
         val glyphHeightPerSize = requestedGlyphHeightDots / requestedSize.coerceAtLeast(1f)
-        val spacing = settings.characterSpacingDots.coerceAtLeast(0f)
+        val spacing = CharacterSpacingRules.clamp(settings.characterSpacingDots)
         val maximumSizeByHeight = (
             (safeHeight - spacing * (unitCount - 1).coerceAtLeast(0)) /
                 (unitCount * glyphHeightPerSize).coerceAtLeast(0.001f)
@@ -87,7 +88,7 @@ object PersonBlockLayoutEngine {
         }
         val scale = effectiveSize / requestedSize.coerceAtLeast(1f)
         val glyphHeight = requestedGlyphHeightDots * scale
-        val glyphAdvance = glyphHeight + spacing
+        val glyphAdvance = CharacterSpacingRules.glyphAdvanceDots(glyphHeight, spacing)
         val baselineOffset = requestedBaselineOffsetDots * scale
         val sequentialWidth = effectiveSize * max(0.65f, fontWidthScale)
         val groupWidth = finalColumns?.groupWidthDots ?: sequentialWidth

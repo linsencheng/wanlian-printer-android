@@ -8,6 +8,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import com.wanlian.printer.model.BorderPosition
 import com.wanlian.printer.model.BorderTemplate
+import com.wanlian.printer.model.CharacterSpacingRules
 import com.wanlian.printer.model.ClosingTextBlockAlignmentGeometry
 import com.wanlian.printer.model.ClosingTextBlockRules
 import com.wanlian.printer.model.CoupletPairDocument
@@ -391,10 +392,17 @@ class BitmapRenderer(
         val paint = printTextPaint(fontSize, settings.textWeight, settings.fontId)
         val metrics = paint.fontMetrics
         val glyphHeight = metrics.descent - metrics.ascent
-        val spacing = settings.characterSpacingDots.coerceAtLeast(0f)
         val maxCharacters = columns.maxOf { it.size }
-        val contentHeight = glyphHeight * maxCharacters + spacing * (maxCharacters - 1).coerceAtLeast(0)
-        return VerticalTextLayout(fontSize, glyphHeight, glyphHeight + spacing, contentHeight)
+        val characterAdvance = CharacterSpacingRules.glyphAdvanceDots(
+            glyphExtentDots = glyphHeight,
+            spacingDots = settings.characterSpacingDots,
+        )
+        val contentHeight = CharacterSpacingRules.contentExtentDots(
+            glyphExtentDots = glyphHeight,
+            unitCount = maxCharacters,
+            spacingDots = settings.characterSpacingDots,
+        )
+        return VerticalTextLayout(fontSize, glyphHeight, characterAdvance, contentHeight)
     }
 
     private fun calculateInlinePersonFlow(
