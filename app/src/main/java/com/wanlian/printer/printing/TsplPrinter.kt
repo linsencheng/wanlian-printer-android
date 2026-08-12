@@ -8,22 +8,50 @@ import java.io.ByteArrayOutputStream
 import java.util.Locale
 import kotlin.math.min
 
+enum class TsplPrintStage {
+    BITMAP_SEND_STARTED,
+    BITMAP_SEND_COMPLETED,
+    PRINT_COMMAND_SENT,
+}
+
+data class TsplPrintDiagnostics(
+    val paperWidthMm: Float,
+    val paperLengthMm: Float,
+    val bitmapWidthDots: Int,
+    val bitmapHeightDots: Int,
+    val widthBytes: Int,
+    val bitmapDataBytes: Int,
+)
+
 class TsplPrinter(
     private val bluetoothManager: BluetoothManager,
 ) {
     suspend fun print(
         rendered: RenderedBitmap,
         settings: PrintSettings,
+        onStage: (TsplPrintStage, TsplPrintDiagnostics) -> Unit = { _, _ -> },
         onProgress: (Float) -> Unit = {},
     ) {
         check(bluetoothManager.isConnected) { "请先连接打印机" }
+        check(rendered.printMask.width > 0 && rendered.printMask.height > 0) {
+            "打印 Bitmap 为空"
+        }
 
         val packed = packPrintMask(
             printMask = rendered.printMask,
             threshold = settings.threshold,
             reversePrinting = settings.reversePrinting,
         )
+        check(packed.isNotEmpty()) { "打印 Bitmap 数据为空" }
         val widthBytes = (rendered.printMask.width + 7) / 8
+        val diagnostics = TsplPrintDiagnostics(
+            paperWidthMm = rendered.paperWidthMm,
+            paperLengthMm = rendered.paperLengthMm,
+            bitmapWidthDots = rendered.printMask.width,
+            bitmapHeightDots = rendered.printMask.height,
+            widthBytes = widthBytes,
+            bitmapDataBytes = packed.size,
+        )
         val setup = buildString {
             append("SIZE ${formatMm(rendered.paperWidthMm)} mm,${formatMm(rendered.paperLengthMm)} mm\r\n")
             append("GAP 0 mm,0 mm\r\n")
@@ -34,6 +62,7 @@ class TsplPrinter(
             append("BITMAP 0,0,$widthBytes,${rendered.printMask.height},0,")
         }.toByteArray(Charsets.US_ASCII)
 
+        onStage(TsplPrintStage.BITMAP_SEND_STARTED, diagnostics)
         bluetoothManager.write(setup)
         var offset = 0
         while (offset < packed.size) {
@@ -44,7 +73,9 @@ class TsplPrinter(
             // SPP printer input buffers are often small; BLE writes are throttled again per MTU.
             delay(settings.chunkDelayMs.coerceIn(0L, 100L))
         }
+        onStage(TsplPrintStage.BITMAP_SEND_COMPLETED, diagnostics)
         bluetoothManager.write("\r\nPRINT 1,1\r\n".toByteArray(Charsets.US_ASCII))
+        onStage(TsplPrintStage.PRINT_COMMAND_SENT, diagnostics)
         onProgress(1f)
     }
 

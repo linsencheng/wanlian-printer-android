@@ -1,6 +1,7 @@
 package com.wanlian.printer
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.wanlian.printer.bluetooth.BluetoothManager
@@ -11,6 +12,7 @@ import com.wanlian.printer.model.CoupletSide
 import com.wanlian.printer.model.CoupletTemplate
 import com.wanlian.printer.model.DocumentMode
 import com.wanlian.printer.model.PairPrintPlan
+import com.wanlian.printer.model.PairPrintTimingRules
 import com.wanlian.printer.model.PairFooterAlignmentRules
 import com.wanlian.printer.model.PrintSettings
 import com.wanlian.printer.model.PrintUnits
@@ -23,6 +25,8 @@ import com.wanlian.printer.printing.FontRepository
 import com.wanlian.printer.printing.RenderedBitmap
 import com.wanlian.printer.printing.RenderedCoupletPair
 import com.wanlian.printer.printing.TsplPrinter
+import com.wanlian.printer.printing.TsplPrintDiagnostics
+import com.wanlian.printer.printing.TsplPrintStage
 import com.wanlian.printer.storage.TemplateRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,7 +42,15 @@ import kotlin.math.roundToInt
 data class PairPrintFailure(
     val side: CoupletSide,
     val reason: String,
+    val completedSides: Set<CoupletSide> = emptySet(),
 )
+
+enum class PairPrintUiStage {
+    SENDING_LEFT,
+    WAITING_FOR_LEFT,
+    SENDING_RIGHT,
+    WAITING_FOR_RIGHT,
+}
 
 private data class EditorHistoryState(
     val settings: PrintSettings,
@@ -76,6 +88,7 @@ data class MainUiState(
     val isPrinting: Boolean = false,
     val printProgress: Float = 0f,
     val printingSide: CoupletSide? = null,
+    val pairPrintStage: PairPrintUiStage? = null,
     val pairPrintFailure: PairPrintFailure? = null,
     val message: String? = null,
 )
@@ -492,18 +505,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         printPairFrom(if (failedSide == CoupletSide.LEFT) 0 else 1)
     }
 
+    fun printRightOnly() = printPairFrom(startIndex = 1)
+
     fun skipFailedPairSide() {
         val failedSide = _uiState.value.pairPrintFailure?.side ?: return
         _uiState.update { it.copy(pairPrintFailure = null) }
         if (failedSide == CoupletSide.LEFT) {
             printPairFrom(startIndex = 1)
         } else {
-            reportMessage("已跳过右联，双联打印结束")
+            reportMessage("已取消右联重试；双联打印未完成")
         }
     }
 
     fun cancelPairPrint() {
-        _uiState.update { it.copy(pairPrintFailure = null, printingSide = null, printProgress = 0f) }
+        _uiState.update {
+            it.copy(
+                pairPrintFailure = null,
+                printingSide = null,
+                pairPrintStage = null,
+                printProgress = 0f,
+            )
+        }
         reportMessage("已取消双联打印")
     }
 
@@ -651,9 +673,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     isPrinting = true,
                     printProgress = startIndex / 2f,
                     pairPrintFailure = null,
+                    pairPrintStage = if (startIndex == 1) {
+                        PairPrintUiStage.SENDING_RIGHT
+                    } else {
+                        PairPrintUiStage.SENDING_LEFT
+                    },
                 )
             }
             var activeSide: CoupletSide? = null
+            val completedSides = linkedSetOf<CoupletSide>()
             try {
                 val pairLength = withContext(Dispatchers.Default) {
                     bitmapRenderer.resolvePairPaperLengthMm(pair)
@@ -662,38 +690,127 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 for (index in startIndex until jobs.size) {
                     val job = jobs[index]
                     activeSide = job.side
+                    if (job.side == CoupletSide.RIGHT) {
+                        logPairPrint("RIGHT（上联）2/2：检查 Bluetooth connection")
+                        check(bluetoothManager.isConnected) { "RIGHT 发送前蓝牙连接已断开" }
+                    }
                     _uiState.update {
-                        it.copy(printingSide = job.side, printProgress = index / jobs.size.toFloat())
+                        it.copy(
+                            printingSide = job.side,
+                            pairPrintStage = if (job.side == CoupletSide.LEFT) {
+                                PairPrintUiStage.SENDING_LEFT
+                            } else {
+                                PairPrintUiStage.SENDING_RIGHT
+                            },
+                            printProgress = index / jobs.size.toFloat(),
+                        )
                     }
                     val rendered = withContext(Dispatchers.Default) {
                         bitmapRenderer.renderCouplet(job.settings, forcedPaperLengthMm = pairLength)
                     }
+                    logPairPrint("${job.side.diagnosticLabel(index)} Bitmap 生成完成：" +
+                        "${rendered.printMask.width}x${rendered.printMask.height}, " +
+                        "SIZE=${rendered.paperWidthMm}x${rendered.paperLengthMm}mm")
                     try {
-                        tsplPrinter.print(rendered, job.settings) { sideProgress ->
-                            _uiState.update {
-                                it.copy(printProgress = (index + sideProgress) / jobs.size.toFloat())
-                            }
-                        }
+                        tsplPrinter.print(
+                            rendered = rendered,
+                            settings = job.settings,
+                            onProgress = { sideProgress ->
+                                _uiState.update {
+                                    it.copy(printProgress = (index + sideProgress) / jobs.size.toFloat())
+                                }
+                            },
+                            onStage = { stage, diagnostics ->
+                                logTsplStage(job.side, index, stage, diagnostics)
+                            },
+                        )
+                        completedSides += job.side
                     } finally {
                         rendered.previewBitmap.recycle()
                         rendered.printMask.recycle()
                     }
+                    val shouldWaitForPhysicalCompletion =
+                        job.side == CoupletSide.RIGHT || index < jobs.lastIndex
+                    if (shouldWaitForPhysicalCompletion) {
+                        val waitMs = PairPrintTimingRules.interJobWaitMs(
+                            paperLengthMm = pairLength,
+                            speedInchesPerSecond = job.settings.speedInchesPerSecond,
+                        )
+                        logPairPrint("等待 ${job.side.name} 实际打印完成：${waitMs}ms")
+                        _uiState.update {
+                            it.copy(
+                                printingSide = job.side,
+                                pairPrintStage = if (job.side == CoupletSide.LEFT) {
+                                    PairPrintUiStage.WAITING_FOR_LEFT
+                                } else {
+                                    PairPrintUiStage.WAITING_FOR_RIGHT
+                                },
+                                printProgress = if (job.side == CoupletSide.LEFT) 0.5f else 0.99f,
+                            )
+                        }
+                        delay(waitMs)
+                    }
                 }
-                reportMessage("双联打印完成")
+                reportMessage(
+                    if (startIndex == 1) {
+                        "RIGHT（上联）单独打印命令已发送"
+                    } else {
+                        "双联打印完成"
+                    },
+                )
             } catch (error: Throwable) {
                 val failedSide = activeSide ?: if (startIndex == 0) CoupletSide.LEFT else CoupletSide.RIGHT
+                Log.e(PAIR_PRINT_LOG_TAG, "${failedSide.name} print failed", error)
                 _uiState.update {
                     it.copy(
                         pairPrintFailure = PairPrintFailure(
                             side = failedSide,
                             reason = error.message ?: "打印中断",
+                            completedSides = completedSides.toSet(),
                         ),
                     )
                 }
+                reportMessage(
+                    if (failedSide == CoupletSide.RIGHT && CoupletSide.LEFT in completedSides) {
+                        "左联打印完成，右联打印失败"
+                    } else {
+                        "${failedSide.label}打印失败"
+                    },
+                )
             } finally {
-                _uiState.update { it.copy(isPrinting = false, printingSide = null) }
+                _uiState.update {
+                    it.copy(isPrinting = false, printingSide = null, pairPrintStage = null)
+                }
             }
         }
+    }
+
+    private fun logTsplStage(
+        side: CoupletSide,
+        index: Int,
+        stage: TsplPrintStage,
+        diagnostics: TsplPrintDiagnostics,
+    ) {
+        val prefix = side.diagnosticLabel(index)
+        val detail = when (stage) {
+            TsplPrintStage.BITMAP_SEND_STARTED ->
+                "BITMAP 开始发送：SIZE=${diagnostics.paperWidthMm}x${diagnostics.paperLengthMm}mm, " +
+                    "bitmap=${diagnostics.bitmapWidthDots}x${diagnostics.bitmapHeightDots}, " +
+                    "widthBytes=${diagnostics.widthBytes}, dataBytes=${diagnostics.bitmapDataBytes}"
+            TsplPrintStage.BITMAP_SEND_COMPLETED ->
+                "BITMAP 发送完成：dataBytes=${diagnostics.bitmapDataBytes}"
+            TsplPrintStage.PRINT_COMMAND_SENT -> "PRINT 命令发送完成"
+        }
+        logPairPrint("$prefix $detail")
+    }
+
+    private fun CoupletSide.diagnosticLabel(index: Int): String = when (this) {
+        CoupletSide.LEFT -> "LEFT（下联）${index + 1}/2："
+        CoupletSide.RIGHT -> "RIGHT（上联）${index + 1}/2："
+    }
+
+    private fun logPairPrint(message: String) {
+        Log.i(PAIR_PRINT_LOG_TAG, message)
     }
 
     private fun printRendered(
@@ -809,6 +926,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
+        private const val PAIR_PRINT_LOG_TAG = "PairPrint"
         private const val MAX_HISTORY = 60
     }
 }

@@ -2,6 +2,7 @@ package com.wanlian.printer.model
 
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToLong
 
 enum class DocumentMode(val label: String) {
     SINGLE("单联"),
@@ -183,5 +184,25 @@ object PairPrintPlan {
     fun jobs(document: CoupletPairDocument): List<PairPrintJob> = listOf(
         PairPrintJob(CoupletSide.LEFT, document.left),
         PairPrintJob(CoupletSide.RIGHT, document.right),
+    )
+}
+
+object PairPrintTimingRules {
+    const val DIAGNOSTIC_MIN_INTER_JOB_WAIT_MS = 20_000L
+    const val SAFETY_MARGIN_MS = 3_000L
+
+    fun estimatedPhysicalPrintDurationMs(
+        paperLengthMm: Float,
+        speedInchesPerSecond: Float,
+        safetyMarginMs: Long = SAFETY_MARGIN_MS,
+    ): Long {
+        val speedMmPerSecond = speedInchesPerSecond.coerceIn(1f, 6f) * 25.4f
+        val feedDurationMs = paperLengthMm.coerceAtLeast(0f) / speedMmPerSecond * 1_000f
+        return feedDurationMs.roundToLong() + safetyMarginMs.coerceAtLeast(0L)
+    }
+
+    fun interJobWaitMs(paperLengthMm: Float, speedInchesPerSecond: Float): Long = max(
+        DIAGNOSTIC_MIN_INTER_JOB_WAIT_MS,
+        estimatedPhysicalPrintDurationMs(paperLengthMm, speedInchesPerSecond),
     )
 }

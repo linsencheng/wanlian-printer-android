@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.wanlian.printer.MainUiState
+import com.wanlian.printer.PairPrintUiStage
 import com.wanlian.printer.model.ConnectionStatus
 import com.wanlian.printer.model.CoupletSide
 import com.wanlian.printer.model.CoupletTemplate
@@ -106,6 +107,7 @@ fun EditorScreen(
     onSelectCoupletSide: (CoupletSide) -> Unit,
     onAlignPairFooters: () -> Unit,
     onAlignPairClosingBlocks: () -> Unit,
+    onPrintRightOnly: () -> Unit,
     onRetryPairPrint: () -> Unit,
     onSkipFailedPairSide: () -> Unit,
     onCancelPairPrint: () -> Unit,
@@ -260,6 +262,10 @@ fun EditorScreen(
             PrintConfirmation(
                 state = state,
                 onCancel = { showPrintConfirmation = false },
+                onPrintRightOnly = {
+                    showPrintConfirmation = false
+                    onPrintRightOnly()
+                },
                 onStart = {
                     showPrintConfirmation = false
                     onPrint()
@@ -320,15 +326,30 @@ fun EditorScreen(
     state.pairPrintFailure?.let { failure ->
         AlertDialog(
             onDismissRequest = onCancelPairPrint,
-            title = { Text("${failure.side.label}打印中断") },
+            title = {
+                Text(
+                    if (
+                        failure.side == CoupletSide.RIGHT &&
+                        CoupletSide.LEFT in failure.completedSides
+                    ) {
+                        "左联打印完成，右联打印失败"
+                    } else {
+                        "${failure.side.label}打印中断"
+                    },
+                )
+            },
             text = { Text(failure.reason) },
             confirmButton = {
-                Button(onClick = onRetryPairPrint) { Text("重试${failure.side.label}") }
+                Button(onClick = onRetryPairPrint) {
+                    Text(if (failure.side == CoupletSide.RIGHT) "仅重试右联" else "重试左联")
+                }
             },
             dismissButton = {
                 Row {
                     TextButton(onClick = onCancelPairPrint) { Text("取消") }
-                    TextButton(onClick = onSkipFailedPairSide) { Text("跳过") }
+                    if (failure.side == CoupletSide.LEFT) {
+                        TextButton(onClick = onSkipFailedPairSide) { Text("跳过左联，打印右联") }
+                    }
                 }
             },
         )
@@ -715,9 +736,16 @@ private fun EditorBottomBar(
     ) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
             if (state.isPrinting) {
-                state.printingSide?.let { side ->
+                val statusText = when (state.pairPrintStage) {
+                    PairPrintUiStage.SENDING_LEFT -> "正在打印 LEFT（下联）1/2"
+                    PairPrintUiStage.WAITING_FOR_LEFT -> "等待下联完成"
+                    PairPrintUiStage.SENDING_RIGHT -> "正在打印 RIGHT（上联）2/2"
+                    PairPrintUiStage.WAITING_FOR_RIGHT -> "等待上联完成"
+                    null -> state.printingSide?.let { "正在打印：${it.label}" }
+                }
+                statusText?.let {
                     Text(
-                        "正在打印：${side.label}  ${if (side == CoupletSide.LEFT) "1 / 2" else "2 / 2"}",
+                        it,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
                         style = MaterialTheme.typography.labelMedium,
                         textAlign = TextAlign.Center,
@@ -749,7 +777,12 @@ private fun EditorBottomBar(
 }
 
 @Composable
-private fun PrintConfirmation(state: MainUiState, onCancel: () -> Unit, onStart: () -> Unit) {
+private fun PrintConfirmation(
+    state: MainUiState,
+    onCancel: () -> Unit,
+    onPrintRightOnly: () -> Unit,
+    onStart: () -> Unit,
+) {
     val rendered = state.preview
     Column(
         modifier = Modifier.fillMaxWidth().padding(20.dp),
@@ -781,6 +814,13 @@ private fun PrintConfirmation(state: MainUiState, onCancel: () -> Unit, onStart:
         InfoRow("纸长", rendered?.let { "${format(it.paperLengthMm)} mm" } ?: "自动")
         InfoRow("打印浓度", state.settings.density.toString())
         InfoRow("打印速度", "${state.settings.speedInchesPerSecond} ips")
+        if (state.documentMode == DocumentMode.PAIR) {
+            TextButton(
+                onClick = onPrintRightOnly,
+                enabled = state.connectionStatus == ConnectionStatus.CONNECTED,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("诊断：仅打印 RIGHT（上联）") }
+        }
         HorizontalDivider()
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("取消") }
