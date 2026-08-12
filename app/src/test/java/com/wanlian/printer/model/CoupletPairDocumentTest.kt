@@ -113,6 +113,20 @@ class CoupletPairDocumentTest {
     }
 
     @Test
+    fun `left and right body character spacing remain independent in pair print jobs`() {
+        var document = CoupletPairDocument.fromSingle(
+            PrintSettings(characterSpacingDots = PrintLayoutRules.MAX_CHARACTER_SPACING_DOTS),
+        ).select(CoupletSide.RIGHT)
+        document = document.replaceSelected(
+            document.right.copy(characterSpacingDots = 180f),
+        )
+
+        val jobs = PairPrintPlan.jobs(document)
+        assertEquals(600f, jobs[0].settings.characterSpacingDots, 0.001f)
+        assertEquals(180f, jobs[1].settings.characterSpacingDots, 0.001f)
+    }
+
+    @Test
     fun `selected side updates and prints left plus eight and right minus four independently`() {
         var document = CoupletPairDocument(
             left = PrintSettings(

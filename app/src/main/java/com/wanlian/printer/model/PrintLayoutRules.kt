@@ -3,6 +3,7 @@ package com.wanlian.printer.model
 import kotlin.math.max
 
 object PrintLayoutRules {
+    const val MAX_CHARACTER_SPACING_DOTS = 600f
     const val DEFAULT_PREFERRED_AUTO_LENGTH_MM = 991f
 
     fun resolveAutoLengthMm(

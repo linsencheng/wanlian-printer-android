@@ -55,6 +55,7 @@ import com.wanlian.printer.model.PersonBlockSettings
 import com.wanlian.printer.model.PersonLayout
 import com.wanlian.printer.model.PersonLayoutRules
 import com.wanlian.printer.model.PersonPlacementMode
+import com.wanlian.printer.model.PrintLayoutRules
 import com.wanlian.printer.model.PrintSettings
 import com.wanlian.printer.model.PrintUnits
 import com.wanlian.printer.model.TextHorizontalAlignment
@@ -230,7 +231,7 @@ fun TextSettingsContent(
         title = "字间距",
         value = settings.characterSpacingDots,
         unit = "dots",
-        valueRange = 0f..240f,
+        valueRange = 0f..PrintLayoutRules.MAX_CHARACTER_SPACING_DOTS,
         step = 2f,
         decimals = 0,
         onValueChange = { value -> onSettingsChange { it.copy(characterSpacingDots = value) } },
@@ -959,7 +960,7 @@ private fun PersonSettingsSection(
                 title = "姓名字间距",
                 value = block.characterSpacingDots,
                 unit = "dots",
-                valueRange = 0f..240f,
+                valueRange = 0f..PersonLayoutRules.MAX_CHARACTER_SPACING_DOTS,
                 step = 2f,
                 decimals = 0,
                 onValueChange = { value ->
@@ -1160,7 +1161,7 @@ private fun CompactToolContent(
                 title = "字间距",
                 value = state.settings.characterSpacingDots,
                 unit = "dots",
-                valueRange = 0f..240f,
+                valueRange = 0f..PrintLayoutRules.MAX_CHARACTER_SPACING_DOTS,
                 step = 2f,
                 decimals = 0,
                 onValueChange = { value -> onSettingsChange { it.copy(characterSpacingDots = value) } },

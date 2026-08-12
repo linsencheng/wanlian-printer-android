@@ -3,6 +3,7 @@ package com.wanlian.printer.printing
 import com.wanlian.printer.model.FooterPerson
 import com.wanlian.printer.model.PersonBlockSettings
 import com.wanlian.printer.model.PersonLayout
+import com.wanlian.printer.model.PersonLayoutRules
 import com.wanlian.printer.model.PersonPlacementMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -90,6 +91,28 @@ class PersonBlockLayoutEngineTest {
         assertTrue(result.bounds.left >= 100f)
         assertTrue(result.bounds.right <= 700f)
         assertTrue(result.bounds.top >= 80f)
+        assertTrue(result.bounds.bottom <= 1600f)
+    }
+
+    @Test
+    fun `expanded six hundred dot name spacing is preserved when height allows`() {
+        val result = layout(
+            PersonBlockSettings(
+                enabled = true,
+                persons = listOf(FooterPerson(relation = "", name = "夏凡", id = "single")),
+                layout = PersonLayout.PARALLEL_COLUMNS,
+                placementMode = PersonPlacementMode.SIDE_OVERLAY,
+                fontSizeDots = 72f,
+                characterSpacingDots = PersonLayoutRules.MAX_CHARACTER_SPACING_DOTS,
+            ),
+        )
+
+        val baselines = result.coordinates.glyphs.map { it.baselineY }
+        assertEquals(
+            PersonLayoutRules.MAX_CHARACTER_SPACING_DOTS + 44f,
+            baselines[1] - baselines[0],
+            0.001f,
+        )
         assertTrue(result.bounds.bottom <= 1600f)
     }
 
