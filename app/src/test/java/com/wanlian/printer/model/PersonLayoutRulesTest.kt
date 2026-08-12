@@ -60,4 +60,18 @@ class PersonLayoutRulesTest {
         assertEquals(0f, below.columnGapDots, 0.001f)
         assertEquals(PrintUnits.mmToDots(20f).toFloat(), above.columnGapDots, 0.001f)
     }
+
+    @Test
+    fun `a single name supports the expanded four hundred dot size`() {
+        val resolved = PersonLayoutRules.resolveParallelColumns(
+            personCount = 1,
+            requestedFontSizeDots = 400f,
+            requestedColumnGapMm = 0f,
+            availableWidthDots = 600f,
+            fontWidthScale = 1f,
+        )
+
+        assertEquals(400f, resolved.effectiveFontSizeDots, 0.001f)
+        assertTrue(!resolved.wasAutoReduced)
+    }
 }

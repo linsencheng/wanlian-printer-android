@@ -29,7 +29,7 @@ object PersonLayoutRules {
     const val MIN_PERSONS = 1
     const val MAX_PERSONS = 6
     const val MIN_FONT_SIZE_DOTS = 20f
-    const val MAX_FONT_SIZE_DOTS = 240f
+    const val MAX_FONT_SIZE_DOTS = 400f
     const val MIN_COLUMN_GAP_MM = 0f
     const val MAX_COLUMN_GAP_MM = 20f
     const val MIN_GROUP_OFFSET_MM = -100f
