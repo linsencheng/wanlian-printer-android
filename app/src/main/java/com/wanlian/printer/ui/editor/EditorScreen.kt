@@ -347,6 +347,7 @@ fun EditorScreen(
             },
             dismissButton = {
                 Row {
+                    TextButton(onClick = onOpenSettings) { Text("查看日志") }
                     TextButton(onClick = onCancelPairPrint) { Text("取消") }
                     if (failure.side == CoupletSide.LEFT) {
                         TextButton(onClick = onSkipFailedPairSide) { Text("跳过左联，打印右联") }

@@ -9,10 +9,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,10 +32,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.unit.dp
 import com.wanlian.printer.MainUiState
 import com.wanlian.printer.model.ConnectionStatus
@@ -59,8 +64,12 @@ fun SettingsScreen(
     onPrintTest: () -> Unit,
     onPrintPolarityTest: () -> Unit,
     onApplyPrinterSettings: () -> Unit,
+    onRefreshDiagnosticLogs: () -> Unit,
+    onClearDiagnosticLogs: () -> Unit,
 ) {
     var advancedExpanded by remember { mutableStateOf(false) }
+    var showDiagnosticLogs by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
     Scaffold(
         topBar = {
             TopAppBar(
@@ -193,7 +202,54 @@ fun SettingsScreen(
                 enabled = !state.isPrinting,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("打印完整测试页") }
+
+            HorizontalDivider()
+            SectionTitle("诊断日志")
+            Text(
+                "记录蓝牙连接、位图上传进度、断开回调和底层异常。日志保存在 App 内，重启后仍可查看。",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = {
+                    onRefreshDiagnosticLogs()
+                    showDiagnosticLogs = true
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("查看打印与蓝牙日志") }
         }
+    }
+
+    if (showDiagnosticLogs) {
+        AlertDialog(
+            onDismissRequest = { showDiagnosticLogs = false },
+            title = { Text("打印与蓝牙诊断日志") },
+            text = {
+                SelectionContainer {
+                    Text(
+                        text = state.diagnosticLogText.ifBlank { "暂无诊断日志" },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 430.dp)
+                            .verticalScroll(rememberScrollState()),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(state.diagnosticLogText))
+                    },
+                    enabled = state.diagnosticLogText.isNotBlank(),
+                ) { Text("复制全部") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = onClearDiagnosticLogs) { Text("清空") }
+                    TextButton(onClick = { showDiagnosticLogs = false }) { Text("关闭") }
+                }
+            },
+        )
     }
 }
 

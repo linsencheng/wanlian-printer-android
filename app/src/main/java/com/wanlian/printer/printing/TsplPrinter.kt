@@ -3,6 +3,7 @@ package com.wanlian.printer.printing
 import android.graphics.Bitmap
 import com.wanlian.printer.bluetooth.BluetoothManager
 import com.wanlian.printer.model.PrintSettings
+import com.wanlian.printer.storage.DiagnosticLogRepository
 import kotlinx.coroutines.delay
 import java.io.ByteArrayOutputStream
 import java.util.Locale
@@ -27,12 +28,22 @@ data class TsplPrintDiagnostics(
 
 class TsplPrinter(
     private val bluetoothManager: BluetoothManager,
+    private val diagnosticLogs: DiagnosticLogRepository? = null,
 ) {
     suspend fun applyPrintSettings(settings: PrintSettings): AppliedPrinterSettings {
         check(bluetoothManager.isConnected) { "请先连接打印机" }
         val applied = TsplSettingsCommands.resolve(settings)
-        bluetoothManager.write(TsplSettingsCommands.build(settings))
-        return applied
+        return try {
+            bluetoothManager.write(TsplSettingsCommands.build(settings))
+            diagnosticLogs?.append(
+                "TSPL_SETTINGS",
+                "发送完成 density=${applied.density}, speed=${applied.speedInchesPerSecond}",
+            )
+            applied
+        } catch (error: Throwable) {
+            diagnosticLogs?.append("TSPL_SETTINGS_FAILED", "打印设置发送失败", error)
+            throw error
+        }
     }
 
     suspend fun print(
@@ -71,25 +82,81 @@ class TsplPrinter(
             append("CLS\r\n")
             append("BITMAP 0,0,$widthBytes,${rendered.printMask.height},0,")
         }.toByteArray(Charsets.US_ASCII)
-
-        bluetoothManager.write(pageSetup)
-        bluetoothManager.write(TsplSettingsCommands.build(settings))
-        onStage(TsplPrintStage.SETTINGS_COMMANDS_SENT, diagnostics)
-        onStage(TsplPrintStage.BITMAP_SEND_STARTED, diagnostics)
-        bluetoothManager.write(bitmapHeader)
+        val chunkSize = settings.bitmapChunkSize.coerceIn(256, 4096)
+        val totalChunks = (packed.size + chunkSize - 1) / chunkSize
+        val transportLabel = bluetoothManager.connectionInfo.value?.transport?.connectionLabel ?: "unknown"
+        var stage = PrintUploadStage.PAGE_SETUP
         var offset = 0
-        while (offset < packed.size) {
-            val count = min(settings.bitmapChunkSize.coerceIn(256, 4096), packed.size - offset)
-            bluetoothManager.write(packed.copyOfRange(offset, offset + count))
-            offset += count
-            onProgress(offset.toFloat() / packed.size.coerceAtLeast(1))
-            // SPP printer input buffers are often small; BLE writes are throttled again per MTU.
-            delay(settings.chunkDelayMs.coerceIn(0L, 100L))
+        var completedChunks = 0
+        var nextProgressMilestone = 10
+        diagnosticLogs?.append(
+            "TSPL_JOB",
+            "开始 width=${rendered.printMask.width}, height=${rendered.printMask.height}, " +
+                "paper=${rendered.paperWidthMm}x${rendered.paperLengthMm}mm, bytes=${packed.size}, " +
+                "chunks=$totalChunks, chunkSize=$chunkSize, delay=${settings.chunkDelayMs}ms, " +
+                "density=${appliedSettings.density}, speed=${appliedSettings.speedInchesPerSecond}, " +
+                "transport=$transportLabel",
+        )
+        try {
+            stage = PrintUploadStage.PAGE_SETUP
+            bluetoothManager.write(pageSetup)
+            stage = PrintUploadStage.SETTINGS
+            bluetoothManager.write(TsplSettingsCommands.build(settings))
+            onStage(TsplPrintStage.SETTINGS_COMMANDS_SENT, diagnostics)
+            onStage(TsplPrintStage.BITMAP_SEND_STARTED, diagnostics)
+            stage = PrintUploadStage.BITMAP_HEADER
+            bluetoothManager.write(bitmapHeader)
+            stage = PrintUploadStage.BITMAP_DATA
+            while (offset < packed.size) {
+                val count = min(chunkSize, packed.size - offset)
+                bluetoothManager.write(packed.copyOfRange(offset, offset + count))
+                offset += count
+                completedChunks++
+                val percent = (offset * 100L / packed.size.coerceAtLeast(1)).toInt()
+                if (percent >= nextProgressMilestone || offset == packed.size) {
+                    diagnosticLogs?.append(
+                        "TSPL_UPLOAD",
+                        "progress=$percent%, bytes=$offset/${packed.size}, chunks=$completedChunks/$totalChunks",
+                    )
+                    while (nextProgressMilestone <= percent) nextProgressMilestone += 10
+                }
+                onProgress(offset.toFloat() / packed.size.coerceAtLeast(1))
+                // SPP printer input buffers are often small; BLE writes are throttled again per MTU.
+                delay(settings.chunkDelayMs.coerceIn(0L, 100L))
+            }
+            onStage(TsplPrintStage.BITMAP_SEND_COMPLETED, diagnostics)
+            stage = PrintUploadStage.PRINT_COMMAND
+            bluetoothManager.write("\r\nPRINT 1,1\r\n".toByteArray(Charsets.US_ASCII))
+            onStage(TsplPrintStage.PRINT_COMMAND_SENT, diagnostics)
+            onProgress(1f)
+            diagnosticLogs?.append(
+                "TSPL_JOB",
+                "完成 bytes=$offset/${packed.size}, chunks=$completedChunks/$totalChunks, PRINT 已发送",
+            )
+        } catch (error: Throwable) {
+            val failure = if (error is PrintUploadException) {
+                error
+            } else {
+                PrintUploadException(
+                    stage = stage,
+                    sentBytes = offset,
+                    totalBytes = packed.size,
+                    completedChunks = completedChunks,
+                    totalChunks = totalChunks,
+                    transportLabel = transportLabel,
+                    cause = error,
+                )
+            }
+            diagnosticLogs?.append(
+                "TSPL_JOB_FAILED",
+                "stage=${failure.stage.name}, bytes=${failure.sentBytes}/${failure.totalBytes}, " +
+                    "progress=${failure.progressPercent}%, " +
+                    "chunks=${failure.completedChunks}/${failure.totalChunks}, " +
+                    "connected=${bluetoothManager.isConnected}",
+                failure,
+            )
+            throw failure
         }
-        onStage(TsplPrintStage.BITMAP_SEND_COMPLETED, diagnostics)
-        bluetoothManager.write("\r\nPRINT 1,1\r\n".toByteArray(Charsets.US_ASCII))
-        onStage(TsplPrintStage.PRINT_COMMAND_SENT, diagnostics)
-        onProgress(1f)
     }
 
     /**

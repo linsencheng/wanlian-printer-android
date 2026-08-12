@@ -27,6 +27,7 @@ import com.wanlian.printer.model.BluetoothTransport
 import com.wanlian.printer.model.ConnectionStatus
 import com.wanlian.printer.model.PrinterConnectionInfo
 import com.wanlian.printer.model.PrinterDevice
+import com.wanlian.printer.storage.DiagnosticLogRepository
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,7 +48,10 @@ import java.util.UUID
 
 /** Bluetooth Classic SPP + BLE transport manager. */
 @SuppressLint("MissingPermission")
-class BluetoothManager(context: Context) {
+class BluetoothManager(
+    context: Context,
+    private val diagnostics: DiagnosticLogRepository? = null,
+) {
     private val appContext = context.applicationContext
     private val androidBluetoothManager =
         appContext.getSystemService(AndroidBluetoothManager::class.java)
@@ -91,6 +95,7 @@ class BluetoothManager(context: Context) {
     }
 
     fun reportError(message: String) {
+        diagnostics?.append("APP_ERROR", message)
         _lastError.value = message
     }
 
@@ -152,6 +157,11 @@ class BluetoothManager(context: Context) {
     }
 
     suspend fun connect(printer: PrinterDevice) = connectionMutex.withLock {
+        diagnostics?.append(
+            "BT_CONNECT",
+            "开始连接 device=${printer.displayName}, address=${maskAddress(printer.address)}, " +
+                "candidates=${printer.transportLabel}",
+        )
         if (!hasConnectPermission()) {
             reportError("缺少蓝牙连接权限")
             return@withLock
@@ -173,6 +183,7 @@ class BluetoothManager(context: Context) {
                 )
                 return@withLock
             } catch (error: Throwable) {
+                diagnostics?.append("BT_CONNECT", "SPP 连接失败", error)
                 lastFailure = error
                 classicSocket = null
             }
@@ -195,12 +206,14 @@ class BluetoothManager(context: Context) {
                 )
                 return@withLock
             } catch (error: Throwable) {
+                diagnostics?.append("BT_CONNECT", "BLE 连接失败", error)
                 lastFailure = error
                 bleEndpoint = null
             }
         }
 
         _connectionStatus.value = ConnectionStatus.ERROR
+        diagnostics?.append("BT_CONNECT", "所有连接通道均失败", lastFailure)
         reportError("连接 ${printer.displayName} 失败：${lastFailure?.message ?: "没有可用的打印通道"}")
         disconnectActiveConnection(updateState = false)
     }
@@ -234,8 +247,15 @@ class BluetoothManager(context: Context) {
                 else -> error("没有可用的蓝牙输出通道")
             }
         } catch (error: Throwable) {
-            handleConnectionLost("发送数据失败：${error.message ?: "连接中断"}")
-            throw IOException("打印中断", error)
+            val transport = _connectionInfo.value?.transport?.connectionLabel ?: "unknown"
+            diagnostics?.append(
+                "BT_WRITE_FAILED",
+                "transport=$transport, requestedBytes=${bytes.size}, connected=$isConnected",
+                error,
+            )
+            val reason = error.message ?: error::class.java.simpleName
+            handleConnectionLost("发送数据失败：$reason")
+            throw IOException("蓝牙发送 ${bytes.size} 字节失败：$reason", error)
         }
     }
 
@@ -352,6 +372,13 @@ class BluetoothManager(context: Context) {
         _currentDevice.value = printer.copy(transports = setOf(info.transport))
         _connectionInfo.value = info
         _connectionStatus.value = ConnectionStatus.CONNECTED
+        diagnostics?.append(
+            "BT_CONNECTED",
+            "device=${printer.displayName}, address=${maskAddress(printer.address)}, " +
+                "transport=${info.transport.connectionLabel}, service=${info.serviceUuid ?: "N/A"}, " +
+                "characteristic=${info.characteristicUuid ?: "N/A"}, " +
+                "properties=${info.characteristicPropertiesLabel}",
+        )
         if (BuildConfig.DEBUG) {
             Log.i(
                 LOG_TAG,
@@ -369,6 +396,11 @@ class BluetoothManager(context: Context) {
     }
 
     private fun handleConnectionLost(message: String) {
+        diagnostics?.append(
+            "BT_DISCONNECTED",
+            "reason=$message, intentional=$intentionalDisconnect, " +
+                "transport=${_connectionInfo.value?.transport?.connectionLabel ?: "unknown"}",
+        )
         disconnectActiveConnection(updateState = false)
         _connectionStatus.value = ConnectionStatus.DISCONNECTED
         if (!intentionalDisconnect) reportError(message)
@@ -453,13 +485,23 @@ class BluetoothManager(context: Context) {
                     }
                     BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
                         val disconnected = intent.bluetoothDeviceExtra()
-                        if (disconnected?.address == _currentDevice.value?.address && isConnected) {
+                        if (
+                            disconnected != null &&
+                            disconnected.address == _currentDevice.value?.address &&
+                            isConnected
+                        ) {
+                            diagnostics?.append(
+                                "BT_CALLBACK",
+                                "收到 ACTION_ACL_DISCONNECTED, device=${safeName(disconnected)}, " +
+                                    "address=${maskAddress(disconnected.address)}",
+                            )
                             handleConnectionLost("打印机连接已断开")
                         }
                     }
                     BluetoothAdapter.ACTION_STATE_CHANGED -> {
                         val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
                         if (state == BluetoothAdapter.STATE_OFF) {
+                            diagnostics?.append("BT_CALLBACK", "手机蓝牙状态变为 STATE_OFF")
                             stopScan()
                             if (isConnected) handleConnectionLost("蓝牙已关闭，打印机连接断开")
                         }
@@ -502,6 +544,11 @@ class BluetoothManager(context: Context) {
 
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+            diagnostics?.append(
+                "BLE_CALLBACK",
+                "onConnectionStateChange status=$status, newState=$newState, " +
+                    "active=${bleEndpoint?.gatt == gatt}",
+            )
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     val requested = runCatching { gatt.requestMtu(PREFERRED_BLE_MTU) }.getOrDefault(false)
@@ -521,11 +568,13 @@ class BluetoothManager(context: Context) {
         }
 
         override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+            diagnostics?.append("BLE_CALLBACK", "onMtuChanged mtu=$mtu, status=$status")
             negotiatedMtu = if (status == BluetoothGatt.GATT_SUCCESS) mtu else DEFAULT_BLE_MTU
             gatt.discoverServices()
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+            diagnostics?.append("BLE_CALLBACK", "onServicesDiscovered status=$status")
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 pendingBleConnection?.completeExceptionally(IOException("读取 BLE 服务失败：$status"))
                 return
@@ -552,6 +601,9 @@ class BluetoothManager(context: Context) {
             characteristic: BluetoothGattCharacteristic,
             status: Int,
         ) {
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                diagnostics?.append("BLE_WRITE_FAILED", "onCharacteristicWrite status=$status")
+            }
             pendingBleWrite?.complete(status)
         }
     }
@@ -563,6 +615,9 @@ class BluetoothManager(context: Context) {
             @Suppress("DEPRECATION")
             getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
         }
+
+    private fun maskAddress(address: String): String =
+        address.takeLast(8).padStart(address.length, '*')
 
     private data class BleEndpoint(
         val gatt: BluetoothGatt,

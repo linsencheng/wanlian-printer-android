@@ -25,11 +25,13 @@ import com.wanlian.printer.printing.FontRepository
 import com.wanlian.printer.printing.AppliedPrinterSettings
 import com.wanlian.printer.printing.RenderedBitmap
 import com.wanlian.printer.printing.RenderedCoupletPair
+import com.wanlian.printer.printing.PrintUploadException
 import com.wanlian.printer.printing.TsplPrinter
 import com.wanlian.printer.printing.TsplPrintDiagnostics
 import com.wanlian.printer.printing.TsplPrintStage
 import com.wanlian.printer.printing.TsplSettingsCommands
 import com.wanlian.printer.storage.TemplateRepository
+import com.wanlian.printer.storage.DiagnosticLogRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -57,6 +59,11 @@ data class PrinterSettingsDelivery(
 data class PrintCompletion(
     val title: String,
     val message: String,
+)
+
+data class PrintFailureNotice(
+    val title: String,
+    val reason: String,
 )
 
 enum class PairPrintUiStage {
@@ -108,15 +115,22 @@ data class MainUiState(
     val isApplyingPrinterSettings: Boolean = false,
     val printerSettingsDelivery: PrinterSettingsDelivery? = null,
     val printCompletion: PrintCompletion? = null,
+    val printFailureNotice: PrintFailureNotice? = null,
+    val diagnosticLogText: String = "",
     val message: String? = null,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-    private val bluetoothManager = BluetoothManager(application)
+    private val diagnosticLogs = DiagnosticLogRepository(application).also {
+        it.append("APP_SESSION", "App 启动 version=${BuildConfig.VERSION_NAME}")
+    }
+    private val bluetoothManager = BluetoothManager(application, diagnosticLogs)
     private val bitmapRenderer = BitmapRenderer()
-    private val tsplPrinter = TsplPrinter(bluetoothManager)
+    private val tsplPrinter = TsplPrinter(bluetoothManager, diagnosticLogs)
     private val repository = TemplateRepository(application)
-    private val _uiState = MutableStateFlow(MainUiState())
+    private val _uiState = MutableStateFlow(
+        MainUiState(diagnosticLogText = diagnosticLogs.read()),
+    )
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
     private var previewJob: Job? = null
     private var testPreviewJob: Job? = null
@@ -605,7 +619,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         "${TsplSettingsCommands.formatSpeed(applied.speedInchesPerSecond)} ips",
                 )
             } catch (error: Throwable) {
-                reportMessage(error.message ?: "打印设置发送失败")
+                reportPrintFailure("打印设置发送失败", error)
             } finally {
                 _uiState.update { it.copy(isApplyingPrinterSettings = false) }
             }
@@ -614,6 +628,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun acknowledgePrintCompletion() {
         _uiState.update { it.copy(printCompletion = null, printProgress = 0f) }
+    }
+
+    fun dismissPrintFailureNotice() {
+        _uiState.update { it.copy(printFailureNotice = null) }
+    }
+
+    fun refreshDiagnosticLogs() {
+        _uiState.update { it.copy(diagnosticLogText = diagnosticLogs.read()) }
+    }
+
+    fun clearDiagnosticLogs() {
+        diagnosticLogs.clear()
+        diagnosticLogs.append("APP_SESSION", "诊断日志由用户清空后重新开始记录")
+        refreshDiagnosticLogs()
+        reportMessage("诊断日志已清空")
     }
 
     fun refreshPreview() = schedulePreview(immediate = true)
@@ -843,13 +872,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (error: Throwable) {
                 val failedSide = activeSide ?: if (startIndex == 0) CoupletSide.LEFT else CoupletSide.RIGHT
                 Log.e(PAIR_PRINT_LOG_TAG, "${failedSide.name} print failed", error)
+                diagnosticLogs.append(
+                    "PAIR_PRINT_FAILED",
+                    "side=${failedSide.name}, completed=${completedSides.joinToString { it.name }}, " +
+                        "connected=${bluetoothManager.isConnected}",
+                    error,
+                )
                 _uiState.update {
                     it.copy(
                         pairPrintFailure = PairPrintFailure(
                             side = failedSide,
-                            reason = error.message ?: "打印中断",
+                            reason = buildFailureReason(error),
                             completedSides = completedSides.toSet(),
                         ),
+                        diagnosticLogText = diagnosticLogs.read(),
                     )
                 }
                 reportMessage(
@@ -898,6 +934,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun logPairPrint(message: String) {
         Log.i(PAIR_PRINT_LOG_TAG, message)
+        diagnosticLogs.append("PAIR_PRINT", message)
     }
 
     private fun printRendered(
@@ -960,7 +997,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     reportMessage(successMessage)
                 }
             } catch (error: Throwable) {
-                reportMessage(error.message ?: errorMessage)
+                reportPrintFailure(errorMessage, error)
             } finally {
                 _uiState.update { it.copy(isPrinting = false) }
             }
@@ -977,6 +1014,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     sentAtEpochMs = System.currentTimeMillis(),
                 ),
             )
+        }
+    }
+
+    private fun reportPrintFailure(title: String, error: Throwable) {
+        diagnosticLogs.append(
+            "PRINT_FAILED",
+            "title=$title, connected=${bluetoothManager.isConnected}, " +
+                "transport=${bluetoothManager.connectionInfo.value?.transport?.connectionLabel ?: "unknown"}",
+            error,
+        )
+        _uiState.update {
+            it.copy(
+                printFailureNotice = PrintFailureNotice(
+                    title = title,
+                    reason = buildFailureReason(error),
+                ),
+                diagnosticLogText = diagnosticLogs.read(),
+            )
+        }
+    }
+
+    private fun buildFailureReason(error: Throwable): String {
+        val upload = error as? PrintUploadException
+        return buildString {
+            if (upload != null) {
+                appendLine("失败阶段：${upload.stage.label}")
+                if (upload.totalBytes > 0) {
+                    appendLine(
+                        "上传进度：${upload.sentBytes} / ${upload.totalBytes} 字节" +
+                            "（${upload.progressPercent}%）",
+                    )
+                    appendLine("分块进度：${upload.completedChunks} / ${upload.totalChunks}")
+                }
+            }
+            appendLine(
+                "蓝牙通道：${upload?.transportLabel ?: bluetoothManager.connectionInfo.value?.transport?.connectionLabel ?: "已断开/未知"}",
+            )
+            appendLine("底层原因：${DiagnosticLogRepository.rootCauseMessage(error)}")
+            append("完整诊断日志已保存在 App 的“设置 → 诊断日志”。")
         }
     }
 
