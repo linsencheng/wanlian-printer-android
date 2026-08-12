@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 data class PairPrintFailure(
@@ -62,6 +63,7 @@ private data class ClosingBlockPairAlignment(
     val requestedOffsetDots: Float,
     val clampedOffsetDots: Float,
     val characterOffsetDots: List<Float>,
+    val maximumResidualDots: Float,
 )
 
 data class MainUiState(
@@ -266,38 +268,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ),
                 )
                 val leftBaseBounds = bitmapRenderer.measureClosingTextBlockBounds(leftBase, pairLength)
-                val characterOffsetDots = if (leftBaseBounds == null || rightBounds == null) {
+                if (leftBaseBounds == null || rightBounds == null) {
                     null
                 } else {
-                    ClosingTextBlockRules.characterOffsetsForAlignment(
-                        movingZeroOffsetCenters = leftBaseBounds.characterBounds.map {
-                            it.zeroOffsetCenterYDots
-                        },
-                        anchorCenters = rightBounds.characterBounds.map { it.centerYDots },
-                    )
-                }
-                if (rightBounds == null || characterOffsetDots == null) {
-                    null
-                } else {
-                    val adjustedLeft = leftBase.copy(
-                        closingTextBlock = leftBase.closingTextBlock.copy(
-                            characterOffsetDots = characterOffsetDots,
-                        ),
-                    )
-                    val adjustedLeftBounds = bitmapRenderer.measureClosingTextBlockBounds(
-                        adjustedLeft,
-                        pairLength,
-                    ) ?: return@withContext null
-                    val requestedOffsetDots = rightBounds.characterBounds.first().centerYDots -
-                        adjustedLeftBounds.alignmentGeometry.zeroOffsetFirstCharacterCenterYDots
+                    val movingCenters = leftBaseBounds.characterBounds.map {
+                        it.zeroOffsetCenterYDots
+                    }
+                    val anchorCenters = rightBounds.characterBounds.map { it.centerYDots }
+                    val requestedOffsetDots = anchorCenters.first() - movingCenters.first()
                     val clampedOffsetDots = ClosingTextBlockRules.alignmentOffsetDots(
-                        geometry = adjustedLeftBounds.alignmentGeometry,
-                        anchorFirstCharacterCenterYDots = rightBounds.characterBounds.first().centerYDots,
+                        geometry = leftBaseBounds.alignmentGeometry,
+                        anchorFirstCharacterCenterYDots = anchorCenters.first(),
                     )
+                    var characterOffsetDots = ClosingTextBlockRules.characterOffsetsForAlignment(
+                        movingZeroOffsetCenters = movingCenters,
+                        anchorCenters = anchorCenters,
+                        resolvedBlockOffsetDots = clampedOffsetDots,
+                    ) ?: return@withContext null
+                    val alignedOffsetYMm = PrintUnits.dotsToMm(clampedOffsetDots.roundToInt())
+                    var maximumResidualDots = Float.POSITIVE_INFINITY
+                    repeat(3) {
+                        val candidate = leftBase.copy(
+                            closingTextBlock = leftBase.closingTextBlock.copy(
+                                offsetYMm = ClosingTextBlockRules.clampOffsetYMm(alignedOffsetYMm),
+                                characterOffsetDots = characterOffsetDots,
+                            ),
+                        )
+                        val candidateBounds = bitmapRenderer.measureClosingTextBlockBounds(
+                            candidate,
+                            pairLength,
+                        ) ?: return@withContext null
+                        val corrections = ClosingTextBlockRules.residualCharacterCorrections(
+                            movingCenters = candidateBounds.characterBounds.map { it.centerYDots },
+                            anchorCenters = anchorCenters,
+                        ) ?: return@withContext null
+                        maximumResidualDots = corrections.maxOfOrNull { abs(it) } ?: 0f
+                        if (maximumResidualDots <= 0.5f) return@repeat
+                        characterOffsetDots = characterOffsetDots.zip(corrections) { offset, correction ->
+                            offset + correction
+                        }
+                    }
                     pair to ClosingBlockPairAlignment(
                         requestedOffsetDots = requestedOffsetDots,
                         clampedOffsetDots = clampedOffsetDots,
                         characterOffsetDots = characterOffsetDots,
+                        maximumResidualDots = maximumResidualDots,
                     )
                 }
             }
@@ -332,7 +347,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             pushHistory(next)
             applyHistoryState(next)
-            if (alignment.requestedOffsetDots != alignment.clampedOffsetDots) {
+            if (alignment.maximumResidualDots > 0.5f) {
+                reportMessage("已将两个尾字对齐到可用范围内的最近位置")
+            } else if (alignment.requestedOffsetDots != alignment.clampedOffsetDots) {
                 reportMessage("已对齐到左联尾字可用范围内的最近位置")
             } else {
                 reportMessage("已以右联为基准对齐左右联尾字")

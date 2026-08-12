@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import com.wanlian.printer.model.BorderPosition
@@ -525,14 +526,26 @@ class BitmapRenderer(
                 characterIndex to settings.closingTextBlock.characterOffsetDots.getOrNull(rank).orZero()
             }.toMap()
         }
-        val closingCharacterBounds = columns.flatMapIndexed { columnIndex, _ ->
+        val closingPaint = printTextPaint(layout.fontSizeDots, settings.textWeight, settings.fontId)
+        val closingMetrics = closingPaint.fontMetrics
+        val closingCharacterBounds = columns.flatMapIndexed { columnIndex, characters ->
             closingIndexes[columnIndex].sorted().map { characterIndex ->
-                val top = topDots + characterIndex * layout.characterAdvanceDots +
+                val lineTop = topDots + characterIndex * layout.characterAdvanceDots +
                     flowShiftDots(characterIndex, inlineInsertIndex, inlineShiftDots) +
                     closingCharacterOffsets[columnIndex][characterIndex].orZero()
+                val baseline = lineTop - closingMetrics.ascent
+                val inkBounds = Rect()
+                val character = characters[characterIndex]
+                closingPaint.getTextBounds(character, 0, character.length, inkBounds)
+                val inkTop = if (inkBounds.isEmpty) lineTop else baseline + inkBounds.top
+                val inkBottom = if (inkBounds.isEmpty) {
+                    lineTop + layout.glyphHeightDots
+                } else {
+                    baseline + inkBounds.bottom
+                }
                 ClosingCharacterPlacement(
-                    topDots = top,
-                    bottomDots = top + layout.glyphHeightDots,
+                    topDots = inkTop,
+                    bottomDots = inkBottom.coerceAtLeast(inkTop + 1f),
                 )
             }
         }.sortedBy(ClosingCharacterPlacement::topDots)

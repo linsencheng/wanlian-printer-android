@@ -115,4 +115,30 @@ class ClosingTextBlockRulesTest {
         assertEquals(200f, 100f + blockOffset + requireNotNull(offsets)[0], 0.001f)
         assertEquals(280f, 160f + blockOffset + requireNotNull(offsets)[1], 0.001f)
     }
+
+    @Test
+    fun `pair alignment corrects both characters when block offset is clamped`() {
+        val offsets = requireNotNull(
+            ClosingTextBlockRules.characterOffsetsForAlignment(
+                movingZeroOffsetCenters = listOf(100f, 160f),
+                anchorCenters = listOf(200f, 280f),
+                resolvedBlockOffsetDots = 80f,
+            ),
+        )
+
+        assertEquals(listOf(20f, 40f), offsets)
+        assertEquals(200f, 100f + 80f + offsets[0], 0.001f)
+        assertEquals(280f, 160f + 80f + offsets[1], 0.001f)
+    }
+
+    @Test
+    fun `residual correction is calculated for every visible tail character`() {
+        assertEquals(
+            listOf(3f, -5f),
+            ClosingTextBlockRules.residualCharacterCorrections(
+                movingCenters = listOf(197f, 285f),
+                anchorCenters = listOf(200f, 280f),
+            ),
+        )
+    }
 }

@@ -111,14 +111,28 @@ object ClosingTextBlockRules {
     fun characterOffsetsForAlignment(
         movingZeroOffsetCenters: List<Float>,
         anchorCenters: List<Float>,
+        resolvedBlockOffsetDots: Float = if (
+            movingZeroOffsetCenters.isNotEmpty() && anchorCenters.isNotEmpty()
+        ) {
+            anchorCenters.first() - movingZeroOffsetCenters.first()
+        } else {
+            0f
+        },
     ): List<Float>? {
         if (movingZeroOffsetCenters.isEmpty() || movingZeroOffsetCenters.size != anchorCenters.size) {
             return null
         }
-        val blockOffset = anchorCenters.first() - movingZeroOffsetCenters.first()
         return movingZeroOffsetCenters.indices.map { index ->
-            anchorCenters[index] - movingZeroOffsetCenters[index] - blockOffset
+            anchorCenters[index] - movingZeroOffsetCenters[index] - resolvedBlockOffsetDots
         }
+    }
+
+    fun residualCharacterCorrections(
+        movingCenters: List<Float>,
+        anchorCenters: List<Float>,
+    ): List<Float>? {
+        if (movingCenters.isEmpty() || movingCenters.size != anchorCenters.size) return null
+        return movingCenters.indices.map { index -> anchorCenters[index] - movingCenters[index] }
     }
 
     fun safeOffsetBounds(

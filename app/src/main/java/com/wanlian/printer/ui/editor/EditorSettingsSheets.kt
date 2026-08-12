@@ -455,7 +455,7 @@ fun FooterSettingsContent(
                 Text("页尾")
             }
             TextButton(onClick = onAlignPairClosingBlocks, enabled = bothClosingBlocksDetected) {
-                Text("尾字")
+                Text("尾两字")
             }
         }
         HorizontalDivider()
