@@ -45,6 +45,7 @@ import com.wanlian.printer.model.ClosingTextBlockRules
 import com.wanlian.printer.model.CutGuideStyle
 import com.wanlian.printer.model.FlowerStyle
 import com.wanlian.printer.model.FlowerAdjustmentLimits
+import com.wanlian.printer.model.FlowerClarityRules
 import com.wanlian.printer.model.FooterLabelAdjustmentLimits
 import com.wanlian.printer.model.FooterLabelPosition
 import com.wanlian.printer.model.FooterTextOrientation
@@ -609,6 +610,29 @@ fun FooterSettingsContent(
                         current.copy(
                             footerLabel = current.footerLabel.copy(
                                 flower = current.footerLabel.flower.copy(style = style),
+                            ),
+                        )
+                    }
+                },
+            )
+            val flowerSupportsClarity = FlowerClarityRules.supports(
+                state.settings.footerLabel.flower.style,
+            )
+            SwitchRow(
+                title = "花朵清晰模式",
+                subtitle = if (flowerSupportsClarity) {
+                    "镂空高密度花芯，减少过热、拖尾和向下蔓延；不影响文字与边框"
+                } else {
+                    "当前花型中心不密集；切换为菊花、牡丹或大丽花等花型时生效"
+                },
+                checked = state.settings.footerLabel.flower.clarityModeEnabled,
+                onCheckedChange = { enabled ->
+                    onSettingsChange { current ->
+                        current.copy(
+                            footerLabel = current.footerLabel.copy(
+                                flower = current.footerLabel.flower.copy(
+                                    clarityModeEnabled = enabled,
+                                ),
                             ),
                         )
                     }

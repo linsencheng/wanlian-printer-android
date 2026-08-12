@@ -5,6 +5,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import com.wanlian.printer.model.FlowerStyle
+import com.wanlian.printer.model.FlowerClarityRules
 import kotlin.math.max
 
 /** Original procedural flower marks; no external bitmap assets are used. */
@@ -16,6 +17,7 @@ class FlowerRenderer {
         topY: Float,
         sizeDots: Float,
         sourcePaint: Paint,
+        clarityModeEnabled: Boolean = false,
     ) {
         if (style == FlowerStyle.NONE) return
         val size = sizeDots.coerceAtLeast(8f)
@@ -27,6 +29,15 @@ class FlowerRenderer {
             strokeJoin = Paint.Join.ROUND
         }
         val fill = Paint(sourcePaint).apply { this.style = Paint.Style.FILL }
+        val useClarityMode = clarityModeEnabled && FlowerClarityRules.supports(style)
+        if (useClarityMode) {
+            val clearRadius = size * FlowerClarityRules.CENTER_CLEAR_RADIUS_RATIO
+            val centerHole = Path().apply {
+                addCircle(centerX, centerY, clearRadius, Path.Direction.CW)
+            }
+            canvas.save()
+            canvas.clipOutPath(centerHole)
+        }
         when (style) {
             FlowerStyle.NONE -> Unit
             FlowerStyle.WHITE_CHRYSANTHEMUM -> drawChrysanthemum(
@@ -104,6 +115,18 @@ class FlowerRenderer {
             FlowerStyle.BUD_BRANCH -> drawBudBranch(canvas, centerX, centerY, size, stroke, fill)
             FlowerStyle.THREE_BLOOM -> drawThreeBloom(canvas, centerX, centerY, size, stroke, fill)
             FlowerStyle.FAN_FLORAL -> drawFanFloral(canvas, centerX, centerY, size, stroke, fill)
+        }
+        if (useClarityMode) {
+            canvas.restore()
+            val clarityRing = Paint(stroke).apply {
+                strokeWidth = max(1f, size * 0.025f)
+            }
+            canvas.drawCircle(
+                centerX,
+                centerY,
+                size * FlowerClarityRules.CENTER_CLEAR_RADIUS_RATIO,
+                clarityRing,
+            )
         }
     }
 

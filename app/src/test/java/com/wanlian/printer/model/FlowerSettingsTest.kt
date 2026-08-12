@@ -19,4 +19,19 @@ class FlowerSettingsTest {
         assertEquals(-60f, FlowerAdjustmentLimits.MIN_OFFSET_MM, 0.001f)
         assertEquals(60f, FlowerAdjustmentLimits.MAX_OFFSET_MM, 0.001f)
     }
+
+    @Test
+    fun `clarity mode targets dense center flower styles`() {
+        assertTrue(FlowerClarityRules.supports(FlowerStyle.WHITE_CHRYSANTHEMUM))
+        assertTrue(FlowerClarityRules.supports(FlowerStyle.CHRYSANTHEMUM_REALISTIC))
+        assertTrue(FlowerClarityRules.supports(FlowerStyle.PEONY_OUTLINE))
+        assertTrue(FlowerClarityRules.supports(FlowerStyle.DAHLIA))
+        assertTrue(!FlowerClarityRules.supports(FlowerStyle.LOTUS))
+        assertTrue(!FlowerClarityRules.supports(FlowerStyle.FLOWER_BRANCH))
+    }
+
+    @Test
+    fun `clarity mode remains opt in for existing templates`() {
+        assertTrue(!FlowerSettings().clarityModeEnabled)
+    }
 }

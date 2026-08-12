@@ -439,6 +439,7 @@ class TemplateRepository(context: Context) {
     private fun flowerToJson(settings: FlowerSettings): JSONObject = JSONObject().apply {
         put("enabled", settings.enabled)
         put("style", settings.style.name)
+        put("clarityModeEnabled", settings.clarityModeEnabled)
         put("sizeMm", settings.sizeMm)
         put("offsetXmm", settings.offsetXmm)
         put("offsetYmm", settings.offsetYmm)
@@ -450,6 +451,10 @@ class TemplateRepository(context: Context) {
         return defaults.copy(
             enabled = json.optBoolean("enabled", defaults.enabled),
             style = legacyFlowerStyle(json.optString("style"), defaults.style),
+            clarityModeEnabled = json.optBoolean(
+                "clarityModeEnabled",
+                defaults.clarityModeEnabled,
+            ),
             sizeMm = json.optDouble("sizeMm", defaults.sizeMm.toDouble()).toFloat(),
             offsetXmm = json.optDouble("offsetXmm", defaults.offsetXmm.toDouble()).toFloat(),
             offsetYmm = json.optDouble("offsetYmm", defaults.offsetYmm.toDouble()).toFloat(),

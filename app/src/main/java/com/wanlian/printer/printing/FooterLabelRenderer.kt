@@ -211,6 +211,7 @@ class FooterLabelRenderer(
             topY = flowerTop,
             sizeDots = measured.flowerSizeDots,
             sourcePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color },
+            clarityModeEnabled = settings.flower.clarityModeEnabled,
         )
         canvas.restore()
     }

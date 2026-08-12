@@ -120,11 +120,30 @@ enum class FlowerStyle(val label: String) {
 data class FlowerSettings(
     val enabled: Boolean = true,
     val style: FlowerStyle = FlowerStyle.WHITE_CHRYSANTHEMUM,
+    /** Keeps dense flower centres hollow so high heat cannot smear into the feed direction. */
+    val clarityModeEnabled: Boolean = false,
     val sizeMm: Float = 14f,
     val offsetXmm: Float = 0f,
     val offsetYmm: Float = 0f,
     val rotationDegrees: Float = 0f,
 )
+
+object FlowerClarityRules {
+    const val CENTER_CLEAR_RADIUS_RATIO = 0.145f
+
+    private val denseCenterStyles = setOf(
+        FlowerStyle.WHITE_CHRYSANTHEMUM,
+        FlowerStyle.CHRYSANTHEMUM_SINGLE,
+        FlowerStyle.CHRYSANTHEMUM_DOUBLE,
+        FlowerStyle.CAMELLIA,
+        FlowerStyle.CHRYSANTHEMUM_REALISTIC,
+        FlowerStyle.PEONY_OUTLINE,
+        FlowerStyle.DAHLIA,
+        FlowerStyle.SUNFLOWER_LINE,
+    )
+
+    fun supports(style: FlowerStyle): Boolean = style in denseCenterStyles
+}
 
 object FlowerAdjustmentLimits {
     const val MIN_SIZE_MM = 8f

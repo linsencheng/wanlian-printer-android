@@ -1,11 +1,27 @@
 package com.wanlian.printer.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CoupletPairDocumentTest {
+    @Test
+    fun `flower clarity mode remains independent between pair sides`() {
+        val pair = CoupletPairDocument.fromSingle(PrintSettings())
+        val updated = pair.replaceSelected(
+            pair.left.copy(
+                footerLabel = pair.left.footerLabel.copy(
+                    flower = pair.left.footerLabel.flower.copy(clarityModeEnabled = true),
+                ),
+            ),
+        )
+
+        assertTrue(updated.left.footerLabel.flower.clarityModeEnabled)
+        assertFalse(updated.right.footerLabel.flower.clarityModeEnabled)
+    }
+
     @Test
     fun `single to pair starts with equal paper lengths and aligned text tops`() {
         val pair = CoupletPairDocument.fromSingle(PrintSettings(paperLengthMm = 991f, topMarginMm = 12f))
