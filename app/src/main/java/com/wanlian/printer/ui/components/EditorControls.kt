@@ -5,6 +5,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -94,6 +96,7 @@ fun SwitchRow(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun <T> ChoiceChips(
     values: List<T>,
@@ -101,7 +104,10 @@ fun <T> ChoiceChips(
     label: (T) -> String,
     onSelected: (T) -> Unit,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         values.forEach { value ->
             FilterChip(
                 selected = value == selected,

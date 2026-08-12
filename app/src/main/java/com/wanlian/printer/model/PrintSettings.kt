@@ -4,6 +4,7 @@ import kotlin.math.roundToInt
 
 data class PrintSettings(
     val text: String = "沉痛悼念\n王先生千古",
+    val fontId: String = "song",
     val autoFontSize: Boolean = true,
     val fontSizeDots: Float = 116f,
     val characterSpacingDots: Float = 16f,
@@ -12,12 +13,17 @@ data class PrintSettings(
     val paperWidthMm: Float = 100f,
     val autoPaperLength: Boolean = true,
     val paperLengthMm: Float = 200f,
+    val preferredAutoLengthMm: Float = 991f,
     val density: Int = 10,
     val speedInchesPerSecond: Float = 3f,
     val threshold: Int = 160,
     val textAlignment: TextHorizontalAlignment = TextHorizontalAlignment.CENTER,
     val textWeight: TextWeight = TextWeight.BOLD,
+    val closingTextBlock: ClosingTextBlockSettings = ClosingTextBlockSettings(),
     val border: BorderSettings = BorderSettings(),
+    val personBlock: PersonBlockSettings = PersonBlockSettings(),
+    val footerLabel: FooterLabelSettings = FooterLabelSettings(),
+    val cutGuide: CutGuideSettings = CutGuideSettings(),
     val printDirection: PrintDirection = PrintDirection.FORWARD,
     val reversePrinting: Boolean = false,
     val bitmapChunkSize: Int = 1024,
@@ -34,9 +40,13 @@ object PrintUnits {
     fun dotsToMm(dots: Int): Float = dots * MILLIMETERS_PER_INCH / DPI
 }
 
-enum class BluetoothTransport(val label: String) {
-    CLASSIC("SPP"),
-    BLE("BLE"),
+enum class BluetoothTransport(
+    val label: String,
+    val badgeLabel: String,
+    val connectionLabel: String,
+) {
+    CLASSIC("SPP", "Classic", "Bluetooth Classic (SPP)"),
+    BLE("BLE", "BLE", "Bluetooth Low Energy (BLE)"),
 }
 
 data class PrinterDevice(

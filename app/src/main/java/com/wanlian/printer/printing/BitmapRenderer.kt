@@ -4,11 +4,20 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import com.wanlian.printer.model.BorderPosition
-import com.wanlian.printer.model.BorderStyle
+import com.wanlian.printer.model.BorderTemplate
+import com.wanlian.printer.model.CharacterSpacingRules
+import com.wanlian.printer.model.ClosingTextBlockAlignmentGeometry
+import com.wanlian.printer.model.ClosingTextBlockRules
+import com.wanlian.printer.model.CoupletPairDocument
+import com.wanlian.printer.model.FooterBlockLayoutEngine
+import com.wanlian.printer.model.PairLayoutRules
+import com.wanlian.printer.model.PersonPlacementMode
 import com.wanlian.printer.model.PrintSettings
+import com.wanlian.printer.model.PrintLayoutRules
 import com.wanlian.printer.model.PrintUnits
 import com.wanlian.printer.model.TextHorizontalAlignment
 import com.wanlian.printer.model.TextWeight
@@ -27,12 +36,112 @@ data class RenderedBitmap(
     val paperLengthMm: Float,
     val effectiveFontSizeDots: Float,
     val mainAreaWidthMm: Float = paperWidthMm,
+    val personBlockBounds: PersonBlockPreviewBounds? = null,
+    val personBlockDraggable: Boolean = false,
+    val closingTextBlockBounds: ClosingTextBlockBounds? = null,
+)
+
+data class PersonBlockPreviewBounds(
+    val leftNorm: Float,
+    val topNorm: Float,
+    val rightNorm: Float,
+    val bottomNorm: Float,
+)
+
+data class ClosingTextBlockBounds(
+    val topDots: Float,
+    val bottomDots: Float,
+    val centerYDots: Float,
+    val characterBounds: List<ClosingTextBlockCharacterBounds>,
+    val alignmentGeometry: ClosingTextBlockAlignmentGeometry,
+    val resolvedOffsetDots: Float,
+)
+
+data class ClosingTextBlockCharacterBounds(
+    val zeroOffsetCenterYDots: Float,
+    val centerYDots: Float,
+)
+
+data class RenderedCoupletPair(
+    val left: RenderedBitmap,
+    val right: RenderedBitmap,
+    val paperLengthMm: Float,
 )
 
 class BitmapRenderer(
     private val borderRenderer: BorderRenderer = BorderRenderer(),
+    private val footerLabelRenderer: FooterLabelRenderer = FooterLabelRenderer(),
+    private val personBlockRenderer: PersonBlockRenderer = PersonBlockRenderer(),
+    private val cutGuideRenderer: CutGuideRenderer = CutGuideRenderer(),
 ) {
-    fun renderCouplet(settings: PrintSettings): RenderedBitmap {
+    fun requiredCoupletLengthMm(settings: PrintSettings): Float {
+        val paperWidthMm = settings.paperWidthMm.coerceIn(MIN_PAPER_WIDTH_MM, MAX_PAPER_WIDTH_MM)
+        val widthDots = PrintUnits.mmToDots(paperWidthMm).coerceAtLeast(1)
+        val borderGeometry = calculateBorderGeometry(settings, widthDots)
+        val columns = normalizedColumns(settings.text)
+        val textLayout = calculateTextLayout(columns, borderGeometry.textWidthDots, settings)
+        val inlineFlow = calculateInlinePersonFlow(
+            settings = settings,
+            columns = columns,
+            textLayout = textLayout,
+            availableWidthDots = borderGeometry.textWidthDots.toFloat(),
+        )
+        val mainContentBottom = PrintUnits.mmToDots(settings.topMarginMm.coerceAtLeast(0f)) +
+            textLayout.contentHeightDots + inlineFlow.extraHeightDots
+        val footerMetrics = footerLabelRenderer.measure(
+            settings.footerLabel,
+            borderGeometry.textWidthDots.toFloat(),
+        )
+        val footerDistance = if (settings.footerLabel.enabled) {
+            PrintUnits.mmToDots(settings.footerLabel.distanceFromMainMm.coerceAtLeast(0f))
+        } else {
+            0
+        }
+        val footerBottomMargin = if (settings.footerLabel.enabled) {
+            PrintUnits.mmToDots(settings.footerLabel.bottomMarginMm.coerceAtLeast(0f))
+        } else {
+            0
+        }
+        val requiredDots = ceil(
+            mainContentBottom + footerDistance + footerMetrics.totalHeightDots +
+                footerBottomMargin + PrintUnits.mmToDots(settings.bottomMarginMm.coerceAtLeast(0f)) +
+                PrintUnits.mmToDots(PrintLayoutRules.cutGuideReserveMm(settings.cutGuide)),
+        ).toInt().coerceAtLeast(1)
+        return PrintUnits.dotsToMm(requiredDots)
+    }
+
+    fun renderCoupletPair(document: CoupletPairDocument): RenderedCoupletPair {
+        val pairLength = resolvePairPaperLengthMm(document)
+        return RenderedCoupletPair(
+            left = renderCouplet(document.left, forcedPaperLengthMm = pairLength),
+            right = renderCouplet(document.right, forcedPaperLengthMm = pairLength),
+            paperLengthMm = pairLength,
+        )
+    }
+
+    fun resolvePairPaperLengthMm(document: CoupletPairDocument): Float {
+        val leftRequired = if (document.left.autoPaperLength) {
+            requiredCoupletLengthMm(document.left)
+        } else {
+            document.left.paperLengthMm
+        }
+        val rightRequired = if (document.right.autoPaperLength) {
+            requiredCoupletLengthMm(document.right)
+        } else {
+            document.right.paperLengthMm
+        }
+        val preferred = if (document.left.autoPaperLength || document.right.autoPaperLength) {
+            max(document.left.preferredAutoLengthMm, document.right.preferredAutoLengthMm)
+        } else {
+            1f
+        }
+        return PairLayoutRules.resolveSideLengthsMm(leftRequired, rightRequired, preferred).leftMm
+    }
+
+    fun renderCouplet(
+        settings: PrintSettings,
+        forcedPaperLengthMm: Float? = null,
+    ): RenderedBitmap {
         val paperWidthMm = settings.paperWidthMm.coerceIn(MIN_PAPER_WIDTH_MM, MAX_PAPER_WIDTH_MM)
         val widthDots = PrintUnits.mmToDots(paperWidthMm).coerceAtLeast(1)
         val borderGeometry = calculateBorderGeometry(settings, widthDots)
@@ -40,14 +149,88 @@ class BitmapRenderer(
         val textLayout = calculateTextLayout(columns, borderGeometry.textWidthDots, settings)
         val topMargin = PrintUnits.mmToDots(settings.topMarginMm.coerceAtLeast(0f))
         val bottomMargin = PrintUnits.mmToDots(settings.bottomMarginMm.coerceAtLeast(0f))
+        val inlineFlow = calculateInlinePersonFlow(
+            settings = settings,
+            columns = columns,
+            textLayout = textLayout,
+            availableWidthDots = borderGeometry.textWidthDots.toFloat(),
+        )
+        val baseMainContentBottom = topMargin + textLayout.contentHeightDots + inlineFlow.extraHeightDots
+        val footerMetrics = footerLabelRenderer.measure(
+            settings.footerLabel,
+            borderGeometry.textWidthDots.toFloat(),
+        )
+        val footerDistance = if (settings.footerLabel.enabled) {
+            PrintUnits.mmToDots(settings.footerLabel.distanceFromMainMm.coerceAtLeast(0f))
+        } else {
+            0
+        }
+        val footerBottomMargin = if (settings.footerLabel.enabled) {
+            PrintUnits.mmToDots(settings.footerLabel.bottomMarginMm.coerceAtLeast(0f))
+        } else {
+            0
+        }
+        val cutGuideReserve = PrintUnits.mmToDots(
+            PrintLayoutRules.cutGuideReserveMm(settings.cutGuide),
+        )
         val requiredHeight = ceil(
-            topMargin + textLayout.contentHeightDots + bottomMargin,
+            baseMainContentBottom +
+                footerDistance +
+                footerMetrics.totalHeightDots +
+                footerBottomMargin +
+                bottomMargin +
+                cutGuideReserve,
         ).toInt().coerceAtLeast(1)
-        val heightDots = if (settings.autoPaperLength) {
-            requiredHeight
+        val heightDots = if (forcedPaperLengthMm != null) {
+            PrintUnits.mmToDots(forcedPaperLengthMm.coerceIn(20f, 1500f))
+        } else if (settings.autoPaperLength) {
+            val requiredLengthMm = PrintUnits.dotsToMm(requiredHeight)
+            PrintUnits.mmToDots(
+                PrintLayoutRules.resolveAutoLengthMm(
+                    requiredLengthMm = requiredLengthMm,
+                    preferredAutoLengthMm = settings.preferredAutoLengthMm,
+                ),
+            )
         } else {
             PrintUnits.mmToDots(settings.paperLengthMm.coerceIn(20f, 1500f))
         }.coerceIn(1, MAX_BITMAP_HEIGHT_DOTS)
+
+        val contentSafeBottom = (heightDots - bottomMargin - cutGuideReserve).toFloat()
+            .coerceAtLeast(topMargin.toFloat() + 1f)
+        val textPlacement = calculateVerticalTextPlacement(
+            columns = columns,
+            layout = textLayout,
+            settings = settings,
+            topDots = topMargin.toFloat(),
+            inlineInsertIndex = inlineFlow.insertIndex,
+            inlineShiftDots = inlineFlow.extraHeightDots,
+            safeBottomDots = contentSafeBottom,
+        )
+        val personLayout = personBlockRenderer.layout(
+            settings = settings.personBlock,
+            safeLeft = borderGeometry.textStartX.toFloat(),
+            safeTop = topMargin.toFloat(),
+            safeRight = (borderGeometry.textStartX + borderGeometry.textWidthDots).toFloat(),
+            safeBottom = contentSafeBottom,
+            inlineTop = inlineFlow.blockTopDots?.let { topMargin + it },
+        )
+        val actualMainContentBottom = max(
+            textPlacement.contentBottomDots,
+            personLayout?.bounds?.bottom ?: topMargin.toFloat(),
+        )
+        val footerLayout = if (settings.footerLabel.enabled) {
+            FooterBlockLayoutEngine.layout(
+                mainContentBottomDots = actualMainContentBottom,
+                paperHeightDots = heightDots.toFloat(),
+                blockHeightDots = footerMetrics.totalHeightDots,
+                distanceFromMainMm = settings.footerLabel.distanceFromMainMm,
+                distanceFromPageEndMm = settings.footerLabel.bottomMarginMm,
+                offsetYMm = settings.footerLabel.offsetYMm,
+                pageBottomSafetyDots = (bottomMargin + cutGuideReserve).toFloat(),
+            )
+        } else {
+            null
+        }
 
         val surfaces = createSurfaces(widthDots, heightDots)
         drawVerticalText(
@@ -58,8 +241,24 @@ class BitmapRenderer(
             areaStartX = borderGeometry.textStartX,
             areaWidthDots = borderGeometry.textWidthDots,
             topDots = topMargin.toFloat(),
+            inlineInsertIndex = inlineFlow.insertIndex,
+            inlineShiftDots = inlineFlow.extraHeightDots,
+            placement = textPlacement,
         )
+        personLayout?.let { layout ->
+            personBlockRenderer.draw(surfaces.maskCanvas, settings.personBlock, layout)
+            personBlockRenderer.draw(surfaces.previewCanvas, settings.personBlock, layout)
+        }
         drawBorders(surfaces, settings, borderGeometry, heightDots)
+        if (footerLayout != null) {
+            drawFooterLabel(
+                surfaces = surfaces,
+                settings = settings,
+                geometry = borderGeometry,
+                topDots = footerLayout.topDots,
+            )
+        }
+        drawCutGuide(surfaces, settings, widthDots, heightDots)
 
         return RenderedBitmap(
             previewBitmap = surfaces.preview,
@@ -68,7 +267,47 @@ class BitmapRenderer(
             paperLengthMm = PrintUnits.dotsToMm(heightDots),
             effectiveFontSizeDots = textLayout.fontSizeDots,
             mainAreaWidthMm = PrintUnits.dotsToMm(borderGeometry.textWidthDots),
+            personBlockBounds = personLayout?.bounds?.toPreviewBounds(widthDots, heightDots),
+            personBlockDraggable = personLayout != null &&
+                settings.personBlock.placementMode == PersonPlacementMode.SIDE_OVERLAY,
+            closingTextBlockBounds = textPlacement.closingBlockTopDots?.let { topDots ->
+                val bottomDots = requireNotNull(textPlacement.closingBlockBottomDots)
+                val characterBounds = textPlacement.closingCharacterBounds.map { character ->
+                    ClosingTextBlockCharacterBounds(
+                        zeroOffsetCenterYDots = (character.topDots + character.bottomDots) / 2f,
+                        centerYDots = (character.topDots + character.bottomDots) / 2f +
+                            textPlacement.closingOffsetDots,
+                    )
+                }
+                ClosingTextBlockBounds(
+                    topDots = topDots + textPlacement.closingOffsetDots,
+                    bottomDots = bottomDots + textPlacement.closingOffsetDots,
+                    centerYDots = (topDots + bottomDots) / 2f + textPlacement.closingOffsetDots,
+                    characterBounds = characterBounds,
+                    alignmentGeometry = ClosingTextBlockAlignmentGeometry(
+                        zeroOffsetFirstCharacterCenterYDots =
+                            requireNotNull(characterBounds.firstOrNull()).zeroOffsetCenterYDots,
+                        minimumOffsetDots = textPlacement.minimumClosingOffsetDots,
+                        maximumOffsetDots = textPlacement.maximumClosingOffsetDots,
+                    ),
+                    resolvedOffsetDots = textPlacement.closingOffsetDots,
+                )
+            },
         )
+    }
+
+    /** Measures the same closing block bounds used by preview and print without retaining bitmaps. */
+    fun measureClosingTextBlockBounds(
+        settings: PrintSettings,
+        forcedPaperLengthMm: Float? = null,
+    ): ClosingTextBlockBounds? {
+        val rendered = renderCouplet(settings, forcedPaperLengthMm)
+        return try {
+            rendered.closingTextBlockBounds
+        } finally {
+            rendered.previewBitmap.recycle()
+            rendered.printMask.recycle()
+        }
     }
 
     fun renderTestPage(settings: PrintSettings): RenderedBitmap {
@@ -144,23 +383,61 @@ class BitmapRenderer(
         val availableWidth = (areaWidthDots - horizontalPadding * 2).coerceAtLeast(1)
         val widthUnits = columns.size +
             (columns.size - 1).coerceAtLeast(0) * COLUMN_GAP_RATIO
-        val maximumFittingSize = availableWidth / widthUnits
+        val fontWidthScale = max(0.65f, FontRepository.resolve(settings.fontId).textScaleX)
+        val maximumFittingSize = availableWidth / (widthUnits * fontWidthScale)
         val fontSize = if (settings.autoFontSize) {
-            maximumFittingSize
+            maximumFittingSize * AUTO_FONT_SIZE_SCALE
         } else {
             min(settings.fontSizeDots, maximumFittingSize)
         }.coerceIn(MIN_FONT_SIZE_DOTS, MAX_FONT_SIZE_DOTS)
-        val paint = printTextPaint(fontSize, settings.textWeight)
+        val paint = printTextPaint(fontSize, settings.textWeight, settings.fontId)
         val metrics = paint.fontMetrics
         val glyphHeight = metrics.descent - metrics.ascent
-        val spacing = settings.characterSpacingDots.coerceAtLeast(0f)
         val maxCharacters = columns.maxOf { it.size }
-        val contentHeight = glyphHeight * maxCharacters + spacing * (maxCharacters - 1).coerceAtLeast(0)
-        return VerticalTextLayout(fontSize, glyphHeight + spacing, contentHeight)
+        val characterAdvance = CharacterSpacingRules.glyphAdvanceDots(
+            glyphExtentDots = glyphHeight,
+            spacingDots = settings.characterSpacingDots,
+        )
+        val contentHeight = CharacterSpacingRules.contentExtentDots(
+            glyphExtentDots = glyphHeight,
+            unitCount = maxCharacters,
+            spacingDots = settings.characterSpacingDots,
+        )
+        return VerticalTextLayout(fontSize, glyphHeight, characterAdvance, contentHeight)
+    }
+
+    private fun calculateInlinePersonFlow(
+        settings: PrintSettings,
+        columns: List<List<String>>,
+        textLayout: VerticalTextLayout,
+        availableWidthDots: Float,
+    ): InlinePersonFlow {
+        val personBlock = settings.personBlock
+        if (!personBlock.participatesInMainTextFlow) {
+            return InlinePersonFlow()
+        }
+        val naturalHeight = personBlockRenderer.naturalHeightDots(personBlock, availableWidthDots)
+        if (naturalHeight <= 0f) return InlinePersonFlow()
+
+        val maximumCharacters = columns.maxOfOrNull { it.size } ?: 0
+        val insertIndex = personBlock.personInsertIndex.coerceIn(0, maximumCharacters)
+        val gap = PrintUnits.mmToDots(INLINE_PERSON_GAP_MM).toFloat()
+        val gapBefore = if (insertIndex > 0) gap else 0f
+        val gapAfter = if (insertIndex < maximumCharacters) gap else 0f
+        val beforeTextHeight = if (insertIndex == 0) {
+            0f
+        } else {
+            textLayout.glyphHeightDots + (insertIndex - 1) * textLayout.characterAdvanceDots
+        }
+        return InlinePersonFlow(
+            insertIndex = insertIndex,
+            extraHeightDots = naturalHeight + gapBefore + gapAfter,
+            blockTopDots = beforeTextHeight + gapBefore,
+        )
     }
 
     private fun calculateBorderGeometry(settings: PrintSettings, widthDots: Int): BorderGeometry {
-        val borderEnabled = settings.border.style != BorderStyle.NONE
+        val borderEnabled = settings.border.style != BorderTemplate.NONE
         val leftEnabled = borderEnabled && settings.border.position != BorderPosition.RIGHT
         val rightEnabled = borderEnabled && settings.border.position != BorderPosition.LEFT
         val edgeInset = PrintUnits.mmToDots(settings.border.edgeInsetMm.coerceIn(0f, 20f))
@@ -197,26 +474,157 @@ class BitmapRenderer(
         areaStartX: Int,
         areaWidthDots: Int,
         topDots: Float,
+        inlineInsertIndex: Int? = null,
+        inlineShiftDots: Float = 0f,
+        placement: VerticalTextPlacement,
     ) {
-        val paint = printTextPaint(layout.fontSizeDots, settings.textWeight)
+        val paint = printTextPaint(layout.fontSizeDots, settings.textWeight, settings.fontId)
+        val glyphWidth = layout.fontSizeDots * max(0.65f, FontRepository.resolve(settings.fontId).textScaleX)
         val gap = layout.fontSizeDots * COLUMN_GAP_RATIO
-        val groupWidth = layout.fontSizeDots * columns.size + gap * (columns.size - 1).coerceAtLeast(0)
+        val groupWidth = glyphWidth * columns.size + gap * (columns.size - 1).coerceAtLeast(0)
         val groupLeft = when (settings.textAlignment) {
             TextHorizontalAlignment.LEFT -> areaStartX.toFloat()
             TextHorizontalAlignment.CENTER -> areaStartX + (areaWidthDots - groupWidth) / 2f
             TextHorizontalAlignment.RIGHT -> areaStartX + areaWidthDots - groupWidth
         }
-        val rightColumnCenter = groupLeft + groupWidth - layout.fontSizeDots / 2f
+        val rightColumnCenter = groupLeft + groupWidth - glyphWidth / 2f
         val metrics = paint.fontMetrics
         columns.forEachIndexed { columnIndex, characters ->
-            val x = rightColumnCenter - columnIndex * (layout.fontSizeDots + gap)
+            val x = rightColumnCenter - columnIndex * (glyphWidth + gap)
             characters.forEachIndexed { characterIndex, character ->
-                val baseline = topDots + characterIndex * layout.characterAdvanceDots - metrics.ascent
+                val flowShift = flowShiftDots(characterIndex, inlineInsertIndex, inlineShiftDots)
+                val closingShift = if (
+                    characterIndex in placement.closingCharacterIndexes[columnIndex]
+                ) {
+                    placement.closingOffsetDots +
+                        placement.closingCharacterOffsets[columnIndex][characterIndex].orZero()
+                } else {
+                    0f
+                }
+                val baseline = topDots + characterIndex * layout.characterAdvanceDots +
+                    flowShift + closingShift - metrics.ascent
                 surfaces.maskCanvas.drawText(character, x, baseline, paint)
                 surfaces.previewCanvas.drawText(character, x, baseline, paint)
             }
         }
     }
+
+    private fun calculateVerticalTextPlacement(
+        columns: List<List<String>>,
+        layout: VerticalTextLayout,
+        settings: PrintSettings,
+        topDots: Float,
+        inlineInsertIndex: Int?,
+        inlineShiftDots: Float,
+        safeBottomDots: Float,
+    ): VerticalTextPlacement {
+        val closingIndexes = columns.map { characters ->
+            ClosingTextBlockRules.matchColumn(characters)?.characterIndexes ?: emptySet()
+        }
+        val closingCharacterOffsets = closingIndexes.map { characterIndexes ->
+            characterIndexes.sorted().mapIndexed { rank, characterIndex ->
+                characterIndex to settings.closingTextBlock.characterOffsetDots.getOrNull(rank).orZero()
+            }.toMap()
+        }
+        val closingPaint = printTextPaint(layout.fontSizeDots, settings.textWeight, settings.fontId)
+        val closingMetrics = closingPaint.fontMetrics
+        val closingCharacterBounds = columns.flatMapIndexed { columnIndex, characters ->
+            closingIndexes[columnIndex].sorted().map { characterIndex ->
+                val lineTop = topDots + characterIndex * layout.characterAdvanceDots +
+                    flowShiftDots(characterIndex, inlineInsertIndex, inlineShiftDots) +
+                    closingCharacterOffsets[columnIndex][characterIndex].orZero()
+                val baseline = lineTop - closingMetrics.ascent
+                val inkBounds = Rect()
+                val character = characters[characterIndex]
+                closingPaint.getTextBounds(character, 0, character.length, inkBounds)
+                val inkTop = if (inkBounds.isEmpty) lineTop else baseline + inkBounds.top
+                val inkBottom = if (inkBounds.isEmpty) {
+                    lineTop + layout.glyphHeightDots
+                } else {
+                    baseline + inkBounds.bottom
+                }
+                ClosingCharacterPlacement(
+                    topDots = inkTop,
+                    bottomDots = inkBottom.coerceAtLeast(inkTop + 1f),
+                )
+            }
+        }.sortedBy(ClosingCharacterPlacement::topDots)
+        val closingBlockTop = closingCharacterBounds.minOfOrNull(ClosingCharacterPlacement::topDots)
+        val closingBlockBottom = closingCharacterBounds.maxOfOrNull(ClosingCharacterPlacement::bottomDots)
+        val requestedClosingOffset = PrintUnits.mmToDots(
+            ClosingTextBlockRules.clampOffsetYMm(settings.closingTextBlock.offsetYMm),
+        ).toFloat()
+        val resolvedClosingOffset = if (closingBlockTop != null && closingBlockBottom != null) {
+            ClosingTextBlockRules.resolveOffsetDots(
+                requestedOffsetDots = requestedClosingOffset,
+                blockTopDots = closingBlockTop,
+                blockBottomDots = closingBlockBottom,
+                safeTopDots = topDots,
+                safeBottomDots = safeBottomDots,
+            )
+        } else {
+            0f
+        }
+        var contentBottom = topDots
+        columns.forEachIndexed { columnIndex, characters ->
+            for (characterIndex in characters.indices) {
+                if (characters[characterIndex].isBlank()) continue
+                val flowShift = flowShiftDots(characterIndex, inlineInsertIndex, inlineShiftDots)
+                val closingShift = if (characterIndex in closingIndexes[columnIndex]) {
+                    resolvedClosingOffset +
+                        closingCharacterOffsets[columnIndex][characterIndex].orZero()
+                } else {
+                    0f
+                }
+                contentBottom = max(
+                    contentBottom,
+                    topDots + characterIndex * layout.characterAdvanceDots + flowShift +
+                        closingShift + layout.glyphHeightDots,
+                )
+            }
+        }
+        return VerticalTextPlacement(
+            closingCharacterIndexes = closingIndexes,
+            closingCharacterOffsets = closingCharacterOffsets,
+            closingOffsetDots = resolvedClosingOffset,
+            contentBottomDots = contentBottom,
+            closingBlockTopDots = closingBlockTop,
+            closingBlockBottomDots = closingBlockBottom,
+            closingCharacterBounds = closingCharacterBounds,
+            minimumClosingOffsetDots = if (closingBlockTop != null && closingBlockBottom != null) {
+                ClosingTextBlockRules.safeOffsetBounds(
+                    blockTopDots = closingBlockTop,
+                    blockBottomDots = closingBlockBottom,
+                    safeTopDots = topDots,
+                    safeBottomDots = safeBottomDots,
+                )?.first ?: 0f
+            } else {
+                0f
+            },
+            maximumClosingOffsetDots = if (closingBlockTop != null && closingBlockBottom != null) {
+                ClosingTextBlockRules.safeOffsetBounds(
+                    blockTopDots = closingBlockTop,
+                    blockBottomDots = closingBlockBottom,
+                    safeTopDots = topDots,
+                    safeBottomDots = safeBottomDots,
+                )?.second ?: 0f
+            } else {
+                0f
+            },
+        )
+    }
+
+    private fun flowShiftDots(
+        characterIndex: Int,
+        inlineInsertIndex: Int?,
+        inlineShiftDots: Float,
+    ): Float = if (inlineInsertIndex != null && characterIndex >= inlineInsertIndex) {
+        inlineShiftDots
+    } else {
+        0f
+    }
+
+    private fun Float?.orZero(): Float = this ?: 0f
 
     private fun drawBorders(
         surfaces: RenderSurfaces,
@@ -224,7 +632,10 @@ class BitmapRenderer(
         geometry: BorderGeometry,
         heightDots: Int,
     ) {
-        listOfNotNull(geometry.leftBounds, geometry.rightBounds).forEach { baseBounds ->
+        listOfNotNull(
+            geometry.leftBounds?.let { it to false },
+            geometry.rightBounds?.let { it to true },
+        ).forEach { (baseBounds, mirrorX) ->
             val bounds = RectF(baseBounds.left, 0f, baseBounds.right, heightDots.toFloat())
             borderRenderer.drawBorder(
                 surfaces.maskCanvas,
@@ -232,6 +643,7 @@ class BitmapRenderer(
                 bounds,
                 settings.border,
                 Color.WHITE,
+                mirrorX = mirrorX,
             )
             borderRenderer.drawBorder(
                 surfaces.previewCanvas,
@@ -239,8 +651,41 @@ class BitmapRenderer(
                 bounds,
                 settings.border,
                 Color.WHITE,
+                mirrorX = mirrorX,
             )
         }
+    }
+
+    private fun drawFooterLabel(
+        surfaces: RenderSurfaces,
+        settings: PrintSettings,
+        geometry: BorderGeometry,
+        topDots: Float,
+    ) {
+        footerLabelRenderer.draw(
+            canvas = surfaces.maskCanvas,
+            settings = settings.footerLabel,
+            areaStartX = geometry.textStartX.toFloat(),
+            areaWidthDots = geometry.textWidthDots.toFloat(),
+            topDots = topDots,
+        )
+        footerLabelRenderer.draw(
+            canvas = surfaces.previewCanvas,
+            settings = settings.footerLabel,
+            areaStartX = geometry.textStartX.toFloat(),
+            areaWidthDots = geometry.textWidthDots.toFloat(),
+            topDots = topDots,
+        )
+    }
+
+    private fun drawCutGuide(
+        surfaces: RenderSurfaces,
+        settings: PrintSettings,
+        widthDots: Int,
+        heightDots: Int,
+    ) {
+        cutGuideRenderer.draw(surfaces.maskCanvas, widthDots, heightDots, settings.cutGuide)
+        cutGuideRenderer.draw(surfaces.previewCanvas, widthDots, heightDots, settings.cutGuide)
     }
 
     private fun normalizedColumns(text: String): List<List<String>> {
@@ -261,17 +706,11 @@ class BitmapRenderer(
         }
     }
 
-    private fun printTextPaint(size: Float, weight: TextWeight) = Paint(
-        Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG,
-    ).apply {
-        color = Color.WHITE
-        textSize = size
-        textAlign = Paint.Align.CENTER
-        typeface = Typeface.create(
-            "serif",
-            if (weight == TextWeight.BOLD) Typeface.BOLD else Typeface.NORMAL,
-        )
-    }
+    private fun printTextPaint(
+        size: Float,
+        weight: TextWeight,
+        fontId: String = "song",
+    ): Paint = FontRepository.createPaint(fontId, size, weight)
 
     private fun printAreaPaint() = Paint().apply {
         color = Color.WHITE
@@ -310,8 +749,32 @@ class BitmapRenderer(
 
     private data class VerticalTextLayout(
         val fontSizeDots: Float,
+        val glyphHeightDots: Float,
         val characterAdvanceDots: Float,
         val contentHeightDots: Float,
+    )
+
+    private data class InlinePersonFlow(
+        val insertIndex: Int? = null,
+        val extraHeightDots: Float = 0f,
+        val blockTopDots: Float? = null,
+    )
+
+    private data class VerticalTextPlacement(
+        val closingCharacterIndexes: List<Set<Int>>,
+        val closingCharacterOffsets: List<Map<Int, Float>>,
+        val closingOffsetDots: Float,
+        val contentBottomDots: Float,
+        val closingBlockTopDots: Float? = null,
+        val closingBlockBottomDots: Float? = null,
+        val closingCharacterBounds: List<ClosingCharacterPlacement> = emptyList(),
+        val minimumClosingOffsetDots: Float = 0f,
+        val maximumClosingOffsetDots: Float = 0f,
+    )
+
+    private data class ClosingCharacterPlacement(
+        val topDots: Float,
+        val bottomDots: Float,
     )
 
     private data class BorderGeometry(
@@ -332,8 +795,20 @@ class BitmapRenderer(
         private const val MIN_PAPER_WIDTH_MM = 30f
         private const val MAX_PAPER_WIDTH_MM = 110f
         private const val COLUMN_GAP_RATIO = 0.28f
+        private const val AUTO_FONT_SIZE_SCALE = 0.92f
         private const val MIN_FONT_SIZE_DOTS = 8f
         private const val MAX_FONT_SIZE_DOTS = 420f
         private const val MAX_BITMAP_HEIGHT_DOTS = 16_000
+        private const val INLINE_PERSON_GAP_MM = 3f
     }
 }
+
+private fun PersonBlockBounds.toPreviewBounds(
+    widthDots: Int,
+    heightDots: Int,
+): PersonBlockPreviewBounds = PersonBlockPreviewBounds(
+    leftNorm = (left / widthDots.coerceAtLeast(1)).coerceIn(0f, 1f),
+    topNorm = (top / heightDots.coerceAtLeast(1)).coerceIn(0f, 1f),
+    rightNorm = (right / widthDots.coerceAtLeast(1)).coerceIn(0f, 1f),
+    bottomNorm = (bottom / heightDots.coerceAtLeast(1)).coerceIn(0f, 1f),
+)

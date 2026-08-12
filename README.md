@@ -14,6 +14,8 @@
 - 黑布白字实时预览，与实际 PrintMask 完全分离
 - 双指缩放、拖动、Fit、100% 和全屏预览
 - 文本、边框、排版、更多四类紧凑编辑面板
+- 通过系统文件选择器导入 TTF/OTF 字体，预览与打印共用同一字体
+- 1～6 人落款编辑，支持姓名竖列连续或同顶线并排布局
 - 本地模板保存、撤销和重做
 - TSPL BITMAP 二值化、8 bit 对齐、分块发送和白字极性适配
 - 无账号、广告、云服务或联网权限
@@ -30,13 +32,18 @@
 生成的 Debug APK：
 
 ```text
-app/build/outputs/apk/debug/app-debug.apk
+app/build/outputs/apk/debug/WanLianPrint-<versionName>-debug.apk
 ```
+
+文件名会自动包含构建版本号，例如：`WanLianPrint-1.0.20260812.120000-debug.apk`。
 
 安装到已连接的 Android 设备：
 
 ```powershell
-adb install -r .\app\build\outputs\apk\debug\app-debug.apk
+$apk = Get-ChildItem .\app\build\outputs\apk\debug\WanLianPrint-*-debug.apk |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+adb install -r $apk.FullName
 ```
 
 ## 使用

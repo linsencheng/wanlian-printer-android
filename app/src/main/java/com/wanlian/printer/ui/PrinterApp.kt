@@ -5,6 +5,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,15 +51,27 @@ fun PrinterApp(
                 state = state,
                 onSettingsChange = viewModel::updateSettings,
                 onOpenDevices = { page = AppPage.DEVICE },
-                onOpenSettings = { page = AppPage.SETTINGS },
+                onOpenSettings = {
+                    viewModel.refreshDiagnosticLogs()
+                    page = AppPage.SETTINGS
+                },
                 onUndo = viewModel::undo,
                 onRedo = viewModel::redo,
                 onSaveTemplate = viewModel::saveTemplate,
+                onUpdateCurrentTemplate = viewModel::updateCurrentTemplate,
                 onLoadTemplate = viewModel::loadTemplate,
+                onRenameTemplate = viewModel::renameTemplate,
                 onDeleteTemplate = viewModel::deleteTemplate,
                 onPrint = viewModel::printCouplet,
-                onPrintTest = viewModel::printTestPage,
-                onPrintPolarityTest = viewModel::printPolarityTest,
+                onEnablePairMode = viewModel::enablePairMode,
+                onKeepPairSideAsSingle = viewModel::keepPairSideAsSingle,
+                onSelectCoupletSide = viewModel::selectCoupletSide,
+                onAlignPairFooters = viewModel::alignPairFootersToSelected,
+                onAlignPairClosingBlocks = viewModel::alignPairClosingBlocks,
+                onRetryPairPrint = viewModel::retryPairPrint,
+                onSkipFailedPairSide = viewModel::skipFailedPairSide,
+                onCancelPairPrint = viewModel::cancelPairPrint,
+                onAcknowledgePrintCompletion = viewModel::acknowledgePrintCompletion,
             )
             AppPage.DEVICE -> DeviceScreen(
                 state = state,
@@ -75,11 +91,33 @@ fun PrinterApp(
                 onAutoReconnectChange = viewModel::setAutoReconnect,
                 onPrintTest = viewModel::printTestPage,
                 onPrintPolarityTest = viewModel::printPolarityTest,
+                onApplyPrinterSettings = viewModel::applyPrinterSettings,
+                onRefreshDiagnosticLogs = viewModel::refreshDiagnosticLogs,
+                onClearDiagnosticLogs = viewModel::clearDiagnosticLogs,
             )
         }
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+        state.printFailureNotice?.let { failure ->
+            AlertDialog(
+                onDismissRequest = viewModel::dismissPrintFailureNotice,
+                title = { Text(failure.title) },
+                text = { Text(failure.reason) },
+                confirmButton = {
+                    Button(onClick = viewModel::dismissPrintFailureNotice) { Text("知道了") }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.dismissPrintFailureNotice()
+                            viewModel.refreshDiagnosticLogs()
+                            page = AppPage.SETTINGS
+                        },
+                    ) { Text("查看日志") }
+                },
+            )
+        }
     }
 }
