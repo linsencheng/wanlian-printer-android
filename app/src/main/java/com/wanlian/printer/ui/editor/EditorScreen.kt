@@ -36,6 +36,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -107,10 +108,10 @@ fun EditorScreen(
     onSelectCoupletSide: (CoupletSide) -> Unit,
     onAlignPairFooters: () -> Unit,
     onAlignPairClosingBlocks: () -> Unit,
-    onPrintRightOnly: () -> Unit,
     onRetryPairPrint: () -> Unit,
     onSkipFailedPairSide: () -> Unit,
     onCancelPairPrint: () -> Unit,
+    onAcknowledgePrintCompletion: () -> Unit,
 ) {
     var showPrintConfirmation by remember { mutableStateOf(false) }
     var showDisconnectedDialog by remember { mutableStateOf(false) }
@@ -128,6 +129,7 @@ fun EditorScreen(
     var lastOpenPanelSnap by rememberSaveable { mutableStateOf(EditorPanelSnap.COMPACT) }
     var panelFraction by rememberSaveable { mutableFloatStateOf(EditorPanelSnap.COMPACT.fraction) }
     var templateName by remember { mutableStateOf("") }
+    val printSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val previewTransformState = rememberPreviewTransformState()
 
     fun selectPanelSnap(target: EditorPanelSnap) {
@@ -258,14 +260,13 @@ fun EditorScreen(
     }
 
     if (showPrintConfirmation) {
-        ModalBottomSheet(onDismissRequest = { showPrintConfirmation = false }) {
+        ModalBottomSheet(
+            onDismissRequest = { showPrintConfirmation = false },
+            sheetState = printSheetState,
+        ) {
             PrintConfirmation(
                 state = state,
                 onCancel = { showPrintConfirmation = false },
-                onPrintRightOnly = {
-                    showPrintConfirmation = false
-                    onPrintRightOnly()
-                },
                 onStart = {
                     showPrintConfirmation = false
                     onPrint()
@@ -351,6 +352,16 @@ fun EditorScreen(
                         TextButton(onClick = onSkipFailedPairSide) { Text("跳过左联，打印右联") }
                     }
                 }
+            },
+        )
+    }
+    state.printCompletion?.let { completion ->
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text(completion.title) },
+            text = { Text(completion.message) },
+            confirmButton = {
+                Button(onClick = onAcknowledgePrintCompletion) { Text("确认") }
             },
         )
     }
@@ -780,7 +791,6 @@ private fun EditorBottomBar(
 private fun PrintConfirmation(
     state: MainUiState,
     onCancel: () -> Unit,
-    onPrintRightOnly: () -> Unit,
     onStart: () -> Unit,
 ) {
     val rendered = state.preview
@@ -814,13 +824,20 @@ private fun PrintConfirmation(
         InfoRow("纸长", rendered?.let { "${format(it.paperLengthMm)} mm" } ?: "自动")
         InfoRow("打印浓度", state.settings.density.toString())
         InfoRow("打印速度", "${state.settings.speedInchesPerSecond} ips")
-        if (state.documentMode == DocumentMode.PAIR) {
-            TextButton(
-                onClick = onPrintRightOnly,
-                enabled = state.connectionStatus == ConnectionStatus.CONNECTED,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("诊断：仅打印 RIGHT（上联）") }
-        }
+        val delivery = state.printerSettingsDelivery
+        val settingsSentForCurrentDevice = delivery != null &&
+            delivery.deviceAddress == state.currentDevice?.address &&
+            delivery.settings.density == state.settings.density.coerceIn(0, 15) &&
+            abs(delivery.settings.speedInchesPerSecond - state.settings.speedInchesPerSecond) < 0.01f
+        Text(
+            if (settingsSentForCurrentDevice) {
+                "✓ 本组浓度/速度已写入当前打印机；开始打印时仍会再次发送。"
+            } else {
+                "开始打印时会先写入本页显示的浓度和速度，再发送图像。"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
         HorizontalDivider()
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("取消") }

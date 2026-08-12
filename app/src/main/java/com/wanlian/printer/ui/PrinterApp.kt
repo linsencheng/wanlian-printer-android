@@ -61,10 +61,10 @@ fun PrinterApp(
                 onSelectCoupletSide = viewModel::selectCoupletSide,
                 onAlignPairFooters = viewModel::alignPairFootersToSelected,
                 onAlignPairClosingBlocks = viewModel::alignPairClosingBlocks,
-                onPrintRightOnly = viewModel::printRightOnly,
                 onRetryPairPrint = viewModel::retryPairPrint,
                 onSkipFailedPairSide = viewModel::skipFailedPairSide,
                 onCancelPairPrint = viewModel::cancelPairPrint,
+                onAcknowledgePrintCompletion = viewModel::acknowledgePrintCompletion,
             )
             AppPage.DEVICE -> DeviceScreen(
                 state = state,
@@ -84,6 +84,7 @@ fun PrinterApp(
                 onAutoReconnectChange = viewModel::setAutoReconnect,
                 onPrintTest = viewModel::printTestPage,
                 onPrintPolarityTest = viewModel::printPolarityTest,
+                onApplyPrinterSettings = viewModel::applyPrinterSettings,
             )
         }
         SnackbarHost(

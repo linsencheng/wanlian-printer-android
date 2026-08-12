@@ -9,6 +9,7 @@ import java.util.Locale
 import kotlin.math.min
 
 enum class TsplPrintStage {
+    SETTINGS_COMMANDS_SENT,
     BITMAP_SEND_STARTED,
     BITMAP_SEND_COMPLETED,
     PRINT_COMMAND_SENT,
@@ -21,11 +22,19 @@ data class TsplPrintDiagnostics(
     val bitmapHeightDots: Int,
     val widthBytes: Int,
     val bitmapDataBytes: Int,
+    val appliedSettings: AppliedPrinterSettings,
 )
 
 class TsplPrinter(
     private val bluetoothManager: BluetoothManager,
 ) {
+    suspend fun applyPrintSettings(settings: PrintSettings): AppliedPrinterSettings {
+        check(bluetoothManager.isConnected) { "请先连接打印机" }
+        val applied = TsplSettingsCommands.resolve(settings)
+        bluetoothManager.write(TsplSettingsCommands.build(settings))
+        return applied
+    }
+
     suspend fun print(
         rendered: RenderedBitmap,
         settings: PrintSettings,
@@ -44,6 +53,7 @@ class TsplPrinter(
         )
         check(packed.isNotEmpty()) { "打印 Bitmap 数据为空" }
         val widthBytes = (rendered.printMask.width + 7) / 8
+        val appliedSettings = TsplSettingsCommands.resolve(settings)
         val diagnostics = TsplPrintDiagnostics(
             paperWidthMm = rendered.paperWidthMm,
             paperLengthMm = rendered.paperLengthMm,
@@ -51,19 +61,22 @@ class TsplPrinter(
             bitmapHeightDots = rendered.printMask.height,
             widthBytes = widthBytes,
             bitmapDataBytes = packed.size,
+            appliedSettings = appliedSettings,
         )
-        val setup = buildString {
+        val pageSetup = buildString {
             append("SIZE ${formatMm(rendered.paperWidthMm)} mm,${formatMm(rendered.paperLengthMm)} mm\r\n")
             append("GAP 0 mm,0 mm\r\n")
-            append("DIRECTION ${settings.printDirection.tsplValue},0\r\n")
-            append("DENSITY ${settings.density.coerceIn(0, 15)}\r\n")
-            append("SPEED ${formatSpeed(settings.speedInchesPerSecond)}\r\n")
+        }.toByteArray(Charsets.US_ASCII)
+        val bitmapHeader = buildString {
             append("CLS\r\n")
             append("BITMAP 0,0,$widthBytes,${rendered.printMask.height},0,")
         }.toByteArray(Charsets.US_ASCII)
 
+        bluetoothManager.write(pageSetup)
+        bluetoothManager.write(TsplSettingsCommands.build(settings))
+        onStage(TsplPrintStage.SETTINGS_COMMANDS_SENT, diagnostics)
         onStage(TsplPrintStage.BITMAP_SEND_STARTED, diagnostics)
-        bluetoothManager.write(setup)
+        bluetoothManager.write(bitmapHeader)
         var offset = 0
         while (offset < packed.size) {
             val count = min(settings.bitmapChunkSize.coerceIn(256, 4096), packed.size - offset)
@@ -122,8 +135,5 @@ class TsplPrinter(
 
     private fun formatMm(value: Float): String =
         String.format(Locale.US, "%.1f", value)
-
-    private fun formatSpeed(value: Float): String =
-        String.format(Locale.US, "%.1f", value.coerceIn(1f, 6f))
 
 }

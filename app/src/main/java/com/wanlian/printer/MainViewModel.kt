@@ -22,11 +22,13 @@ import com.wanlian.printer.model.PrinterConnectionInfo
 import com.wanlian.printer.model.PrinterDevice
 import com.wanlian.printer.printing.BitmapRenderer
 import com.wanlian.printer.printing.FontRepository
+import com.wanlian.printer.printing.AppliedPrinterSettings
 import com.wanlian.printer.printing.RenderedBitmap
 import com.wanlian.printer.printing.RenderedCoupletPair
 import com.wanlian.printer.printing.TsplPrinter
 import com.wanlian.printer.printing.TsplPrintDiagnostics
 import com.wanlian.printer.printing.TsplPrintStage
+import com.wanlian.printer.printing.TsplSettingsCommands
 import com.wanlian.printer.storage.TemplateRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -44,6 +46,17 @@ data class PairPrintFailure(
     val side: CoupletSide,
     val reason: String,
     val completedSides: Set<CoupletSide> = emptySet(),
+)
+
+data class PrinterSettingsDelivery(
+    val settings: AppliedPrinterSettings,
+    val deviceAddress: String,
+    val sentAtEpochMs: Long,
+)
+
+data class PrintCompletion(
+    val title: String,
+    val message: String,
 )
 
 enum class PairPrintUiStage {
@@ -92,6 +105,9 @@ data class MainUiState(
     val printingSide: CoupletSide? = null,
     val pairPrintStage: PairPrintUiStage? = null,
     val pairPrintFailure: PairPrintFailure? = null,
+    val isApplyingPrinterSettings: Boolean = false,
+    val printerSettingsDelivery: PrinterSettingsDelivery? = null,
+    val printCompletion: PrintCompletion? = null,
     val message: String? = null,
 )
 
@@ -510,8 +526,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             printPairFrom(startIndex = 0)
         } else {
             printRendered(
-                successMessage = "打印数据已发送",
+                successMessage = "打印完成",
                 errorMessage = "打印失败",
+                waitForPhysicalCompletion = true,
+                completion = PrintCompletion(
+                    title = "打印完成",
+                    message = "当前模板和全部排版内容已保留。确认后可继续编辑或再次打印。",
+                ),
             ) { settings -> bitmapRenderer.renderCouplet(settings) }
         }
     }
@@ -522,13 +543,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         printPairFrom(if (failedSide == CoupletSide.LEFT) 0 else 1)
     }
 
-    fun printRightOnly() = printPairFrom(startIndex = 1)
-
     fun skipFailedPairSide() {
         val failedSide = _uiState.value.pairPrintFailure?.side ?: return
         _uiState.update { it.copy(pairPrintFailure = null) }
         if (failedSide == CoupletSide.LEFT) {
-            printPairFrom(startIndex = 1)
+            printPairFrom(
+                startIndex = 1,
+                completion = PrintCompletion(
+                    title = "右联打印完成",
+                    message = "右联已完成，左联已跳过。当前模板和全部排版内容已保留。",
+                ),
+            )
         } else {
             reportMessage("已取消右联重试；双联打印未完成")
         }
@@ -552,9 +577,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) { settings -> bitmapRenderer.renderTestPage(settings) }
 
     fun printPolarityTest() = printRendered(
-        successMessage = "白字极性测试已发送",
+        successMessage = "覆盖测试已发送",
         errorMessage = "极性测试打印失败",
     ) { settings -> bitmapRenderer.renderPolarityTest(settings) }
+
+    fun applyPrinterSettings() {
+        when (PrintGate.resolve(_uiState.value.connectionStatus, _uiState.value.isPrinting)) {
+            PrintGate.ALLOWED -> Unit
+            PrintGate.BLOCKED_CONNECTING -> {
+                reportMessage("正在连接打印机，请稍候")
+                return
+            }
+            PrintGate.BLOCKED_DISCONNECTED -> {
+                reportMessage("请先连接打印设备")
+                return
+            }
+            PrintGate.BLOCKED_PRINTING -> return
+        }
+        val settings = _uiState.value.settings
+        viewModelScope.launch {
+            _uiState.update { it.copy(isApplyingPrinterSettings = true) }
+            try {
+                val applied = tsplPrinter.applyPrintSettings(settings)
+                recordPrinterSettingsDelivery(applied)
+                reportMessage(
+                    "打印设置已写入：浓度 ${applied.density}，速度 " +
+                        "${TsplSettingsCommands.formatSpeed(applied.speedInchesPerSecond)} ips",
+                )
+            } catch (error: Throwable) {
+                reportMessage(error.message ?: "打印设置发送失败")
+            } finally {
+                _uiState.update { it.copy(isApplyingPrinterSettings = false) }
+            }
+        }
+    }
+
+    fun acknowledgePrintCompletion() {
+        _uiState.update { it.copy(printCompletion = null, printProgress = 0f) }
+    }
 
     fun refreshPreview() = schedulePreview(immediate = true)
 
@@ -670,7 +730,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         renderTestPreviews()
     }
 
-    private fun printPairFrom(startIndex: Int) {
+    private fun printPairFrom(
+        startIndex: Int,
+        completion: PrintCompletion = PrintCompletion(
+            title = "双联打印完成",
+            message = "左右联均已完成。当前模板和全部排版内容已保留。",
+        ),
+    ) {
         when (PrintGate.resolve(_uiState.value.connectionStatus, _uiState.value.isPrinting)) {
             PrintGate.ALLOWED -> Unit
             PrintGate.BLOCKED_CONNECTING -> {
@@ -690,6 +756,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     isPrinting = true,
                     printProgress = startIndex / 2f,
                     pairPrintFailure = null,
+                    printCompletion = null,
                     pairPrintStage = if (startIndex == 1) {
                         PairPrintUiStage.SENDING_RIGHT
                     } else {
@@ -768,13 +835,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         delay(waitMs)
                     }
                 }
-                reportMessage(
-                    if (startIndex == 1) {
-                        "RIGHT（上联）单独打印命令已发送"
-                    } else {
-                        "双联打印完成"
-                    },
-                )
+                _uiState.update {
+                    it.copy(
+                        printCompletion = completion,
+                    )
+                }
             } catch (error: Throwable) {
                 val failedSide = activeSide ?: if (startIndex == 0) CoupletSide.LEFT else CoupletSide.RIGHT
                 Log.e(PAIR_PRINT_LOG_TAG, "${failedSide.name} print failed", error)
@@ -810,6 +875,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         val prefix = side.diagnosticLabel(index)
         val detail = when (stage) {
+            TsplPrintStage.SETTINGS_COMMANDS_SENT -> {
+                recordPrinterSettingsDelivery(diagnostics.appliedSettings)
+                "打印设置已写入：DENSITY ${diagnostics.appliedSettings.density}, " +
+                    "SPEED ${TsplSettingsCommands.formatSpeed(diagnostics.appliedSettings.speedInchesPerSecond)}"
+            }
             TsplPrintStage.BITMAP_SEND_STARTED ->
                 "BITMAP 开始发送：SIZE=${diagnostics.paperWidthMm}x${diagnostics.paperLengthMm}mm, " +
                     "bitmap=${diagnostics.bitmapWidthDots}x${diagnostics.bitmapHeightDots}, " +
@@ -833,6 +903,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun printRendered(
         successMessage: String,
         errorMessage: String,
+        waitForPhysicalCompletion: Boolean = false,
+        completion: PrintCompletion? = null,
         renderer: (PrintSettings) -> RenderedBitmap,
     ) {
         when (PrintGate.resolve(_uiState.value.connectionStatus, _uiState.value.isPrinting)) {
@@ -849,18 +921,62 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val settings = _uiState.value.settings
         viewModelScope.launch {
-            _uiState.update { it.copy(isPrinting = true, printProgress = 0f) }
+            _uiState.update {
+                it.copy(isPrinting = true, printProgress = 0f, printCompletion = null)
+            }
+            var paperLengthMm = 0f
             try {
                 val rendered = withContext(Dispatchers.Default) { renderer(settings) }
-                tsplPrinter.print(rendered, settings) { progress ->
-                    _uiState.update { it.copy(printProgress = progress) }
+                paperLengthMm = rendered.paperLengthMm
+                try {
+                    tsplPrinter.print(
+                        rendered = rendered,
+                        settings = settings,
+                        onStage = { stage, diagnostics ->
+                            if (stage == TsplPrintStage.SETTINGS_COMMANDS_SENT) {
+                                recordPrinterSettingsDelivery(diagnostics.appliedSettings)
+                            }
+                        },
+                        onProgress = { progress ->
+                            _uiState.update { it.copy(printProgress = progress) }
+                        },
+                    )
+                } finally {
+                    rendered.previewBitmap.recycle()
+                    rendered.printMask.recycle()
                 }
-                reportMessage(successMessage)
+                if (waitForPhysicalCompletion) {
+                    _uiState.update { it.copy(printProgress = 0.99f) }
+                    delay(
+                        PairPrintTimingRules.estimatedPhysicalPrintDurationMs(
+                            paperLengthMm = paperLengthMm,
+                            speedInchesPerSecond = settings.speedInchesPerSecond,
+                        ),
+                    )
+                }
+                if (completion != null) {
+                    _uiState.update { it.copy(printCompletion = completion) }
+                } else {
+                    reportMessage(successMessage)
+                }
             } catch (error: Throwable) {
                 reportMessage(error.message ?: errorMessage)
             } finally {
                 _uiState.update { it.copy(isPrinting = false) }
             }
+        }
+    }
+
+    private fun recordPrinterSettingsDelivery(settings: AppliedPrinterSettings) {
+        val deviceAddress = bluetoothManager.currentDevice.value?.address ?: return
+        _uiState.update {
+            it.copy(
+                printerSettingsDelivery = PrinterSettingsDelivery(
+                    settings = settings,
+                    deviceAddress = deviceAddress,
+                    sentAtEpochMs = System.currentTimeMillis(),
+                ),
+            )
         }
     }
 

@@ -36,6 +36,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.wanlian.printer.MainUiState
+import com.wanlian.printer.model.ConnectionStatus
 import com.wanlian.printer.model.PrintDirection
 import com.wanlian.printer.model.PrintSettings
 import com.wanlian.printer.printing.RenderedBitmap
@@ -43,6 +44,9 @@ import com.wanlian.printer.ui.components.ChoiceChips
 import com.wanlian.printer.ui.components.SettingSlider
 import com.wanlian.printer.ui.components.SwitchRow
 import java.util.Locale
+import java.text.DateFormat
+import java.util.Date
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,6 +58,7 @@ fun SettingsScreen(
     onAutoReconnectChange: (Boolean) -> Unit,
     onPrintTest: () -> Unit,
     onPrintPolarityTest: () -> Unit,
+    onApplyPrinterSettings: () -> Unit,
 ) {
     var advancedExpanded by remember { mutableStateOf(false) }
     Scaffold(
@@ -92,6 +97,20 @@ fun SettingsScreen(
                     onValueChange = { value ->
                         onSettingsChange { it.copy(speedInchesPerSecond = value) }
                     },
+                )
+                PrinterSettingsDeliveryStatus(state)
+                Button(
+                    onClick = onApplyPrinterSettings,
+                    enabled = state.connectionStatus == ConnectionStatus.CONNECTED &&
+                        !state.isPrinting && !state.isApplyingPrinterSettings,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (state.isApplyingPrinterSettings) "正在写入打印机…" else "发送浓度和速度到打印机")
+                }
+                Text(
+                    "正式打印时也会在每一联图像前再次发送 DENSITY 和 SPEED。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text("打印方向", style = MaterialTheme.typography.bodyMedium)
                 ChoiceChips(
@@ -159,7 +178,7 @@ fun SettingsScreen(
             HorizontalDivider()
             SectionTitle("打印机测试")
             Text(
-                "测试功能已从编辑首页移到这里。先执行白字极性测试，确认黑色背景不转印。",
+                "如果字迹发淡或覆盖不完整，先发送设置，再打印下面的小型覆盖测试。建议从浓度 12 / 速度 1.5 开始；仍发淡可试浓度 15 / 速度 1.0。",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             TestPreview(state.polarityTestPreview, height = 220)
@@ -167,7 +186,7 @@ fun SettingsScreen(
                 onClick = onPrintPolarityTest,
                 enabled = !state.isPrinting,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("打印白字极性测试") }
+            ) { Text("应用当前设置并打印覆盖测试") }
             TestPreview(state.testPreview, height = 280)
             OutlinedButton(
                 onClick = onPrintTest,
@@ -176,6 +195,38 @@ fun SettingsScreen(
             ) { Text("打印完整测试页") }
         }
     }
+}
+
+@Composable
+private fun PrinterSettingsDeliveryStatus(state: MainUiState) {
+    val delivery = state.printerSettingsDelivery
+    val currentDevice = state.currentDevice
+    val currentDensity = state.settings.density.coerceIn(0, 15)
+    val currentSpeed = state.settings.speedInchesPerSecond.coerceIn(1f, 6f)
+    val matchesCurrent = delivery != null &&
+        delivery.deviceAddress == currentDevice?.address &&
+        delivery.settings.density == currentDensity &&
+        abs(delivery.settings.speedInchesPerSecond - currentSpeed) < 0.01f
+    val status = when {
+        state.isApplyingPrinterSettings -> "正在通过蓝牙写入设置命令…"
+        matchesCurrent -> {
+            val time = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(delivery!!.sentAtEpochMs))
+            "✓ 蓝牙写入成功（$time）\nDENSITY ${delivery.settings.density} · SPEED ${format(delivery.settings.speedInchesPerSecond, 1)} ips"
+        }
+        currentDevice == null -> "连接打印机后，可验证浓度和速度命令是否成功写入。"
+        delivery != null -> "当前滑块值尚未发送到这台打印机。"
+        else -> "尚未发送本组浓度和速度。"
+    }
+    Text(
+        status,
+        style = MaterialTheme.typography.bodyMedium,
+        color = if (matchesCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Text(
+        "“蓝牙写入成功”表示命令已交给打印机连接；此机型无可靠参数回读，因此请用覆盖测试确认实际热量和碳带覆盖。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
