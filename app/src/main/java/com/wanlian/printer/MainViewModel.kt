@@ -1,6 +1,8 @@
 package com.wanlian.printer
 
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -18,6 +20,7 @@ import com.wanlian.printer.model.PrintSettings
 import com.wanlian.printer.model.PrintUnits
 import com.wanlian.printer.model.PrintGate
 import com.wanlian.printer.model.TemplateNameRules
+import com.wanlian.printer.model.TemplateTransferRules
 import com.wanlian.printer.model.PrinterConnectionInfo
 import com.wanlian.printer.model.PrinterDevice
 import com.wanlian.printer.printing.BitmapRenderer
@@ -32,6 +35,7 @@ import com.wanlian.printer.printing.TsplPrintStage
 import com.wanlian.printer.printing.TsplSettingsCommands
 import com.wanlian.printer.storage.TemplateRepository
 import com.wanlian.printer.storage.DiagnosticLogRepository
+import com.wanlian.printer.storage.TemplateTransferService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -128,6 +132,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val bitmapRenderer = BitmapRenderer()
     private val tsplPrinter = TsplPrinter(bluetoothManager, diagnosticLogs)
     private val repository = TemplateRepository(application)
+    private val templateTransferService = TemplateTransferService(application)
     private val _uiState = MutableStateFlow(
         MainUiState(diagnosticLogText = diagnosticLogs.read()),
     )
@@ -548,6 +553,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     message = "当前模板和全部排版内容已保留。确认后可继续编辑或再次打印。",
                 ),
             ) { settings -> bitmapRenderer.renderCouplet(settings) }
+        }
+    }
+
+    fun shareTemplate(template: CoupletTemplate) {
+        viewModelScope.launch {
+            try {
+                val payload = repository.exportTemplatePayload(template)
+                val shareIntent = templateTransferService.createShareIntent(template, payload)
+                val chooser = Intent.createChooser(shareIntent, "分享挽联模板").apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                getApplication<Application>().startActivity(chooser)
+                diagnosticLogs.append(
+                    "TEMPLATE_EXPORT",
+                    "已创建分享文件 name=${template.name}, mode=${template.documentMode.name}",
+                )
+            } catch (error: Throwable) {
+                diagnosticLogs.append("TEMPLATE_EXPORT_FAILED", "模板分享失败", error)
+                reportMessage(error.message ?: "模板分享失败")
+            }
+        }
+    }
+
+    fun importTemplate(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val payload = templateTransferService.readPayload(uri)
+                val decoded = repository.decodeTemplatePayload(payload)
+                val (normalized, missingFont) = normalizeImportedTemplateFonts(decoded)
+                val importName = TemplateTransferRules.uniqueImportedName(
+                    sourceName = normalized.name,
+                    existingNames = _uiState.value.templates.map { it.name },
+                )
+                val importedId = repository.saveTemplate(
+                    name = importName,
+                    settings = normalized.settings,
+                    documentMode = normalized.documentMode,
+                    pairDocument = normalized.pairDocument,
+                ) ?: error("模板名称无效")
+                diagnosticLogs.append(
+                    "TEMPLATE_IMPORT",
+                    "导入成功 id=$importedId, name=$importName, mode=${normalized.documentMode.name}, " +
+                        "fontFallback=$missingFont",
+                )
+                reportMessage(
+                    if (missingFont) {
+                        "模板已导入：$importName；原自定义字体未安装，已改用默认字体"
+                    } else {
+                        "模板已导入：$importName"
+                    },
+                )
+            } catch (error: Throwable) {
+                diagnosticLogs.append("TEMPLATE_IMPORT_FAILED", "模板导入失败 uri=$uri", error)
+                reportMessage(error.message ?: "模板导入失败")
+            }
         }
     }
 
@@ -1127,6 +1187,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             personBlock = personBlock,
             footerLabel = footer,
         ) to missing
+    }
+
+    private fun normalizeImportedTemplateFonts(
+        template: CoupletTemplate,
+    ): Pair<CoupletTemplate, Boolean> {
+        val pair = template.pairDocument
+        if (template.documentMode == DocumentMode.PAIR && pair != null) {
+            val (left, leftMissing) = normalizeFontReferences(pair.left)
+            val (right, rightMissing) = normalizeFontReferences(pair.right)
+            val normalizedPair = pair.copy(left = left, right = right)
+            return template.copy(
+                settings = normalizedPair.selectedSettings,
+                pairDocument = normalizedPair,
+            ) to (leftMissing || rightMissing)
+        }
+        val (settings, missing) = normalizeFontReferences(template.settings)
+        return template.copy(settings = settings, pairDocument = null) to missing
     }
 
     override fun onCleared() {

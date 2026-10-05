@@ -31,6 +31,7 @@ import com.wanlian.printer.model.PrinterDevice
 import com.wanlian.printer.model.TextHorizontalAlignment
 import com.wanlian.printer.model.TextWeight
 import com.wanlian.printer.model.TemplateNameRules
+import com.wanlian.printer.model.TemplateTransferRules
 import com.wanlian.printer.model.renamedTo
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -113,6 +114,31 @@ class TemplateRepository(context: Context) {
         }
     }
 
+    fun exportTemplatePayload(template: CoupletTemplate): String = JSONObject().apply {
+        put("format", TemplateTransferRules.FORMAT_ID)
+        put("version", TemplateTransferRules.FORMAT_VERSION)
+        put("exportedAt", System.currentTimeMillis())
+        put("template", templateToJson(template))
+    }.toString(2)
+
+    fun decodeTemplatePayload(payload: String): CoupletTemplate {
+        val root = runCatching { JSONObject(payload) }.getOrElse {
+            throw IllegalArgumentException("这不是有效的挽联模板文件", it)
+        }
+        if (root.optString("format") != TemplateTransferRules.FORMAT_ID) {
+            throw IllegalArgumentException("文件类型不正确，请选择 .wanlian 模板文件")
+        }
+        val version = root.optInt("version", -1)
+        if (version != TemplateTransferRules.FORMAT_VERSION) {
+            throw IllegalArgumentException("模板文件版本 $version 暂不支持")
+        }
+        val templateJson = root.optJSONObject("template")
+            ?: throw IllegalArgumentException("模板文件缺少内容")
+        return runCatching { templateFromJson(templateJson) }.getOrElse {
+            throw IllegalArgumentException("模板内容损坏，无法导入", it)
+        }
+    }
+
     suspend fun saveLastDevice(device: PrinterDevice) {
         dataStore.edit { preferences ->
             preferences[LAST_DEVICE_JSON] = deviceToJson(device).toString()
@@ -128,42 +154,53 @@ class TemplateRepository(context: Context) {
     }
 
     private fun templatesToJson(templates: List<CoupletTemplate>): String = JSONArray().apply {
-        templates.forEach { template ->
-            put(
-                JSONObject()
-                    .put("id", template.id)
-                    .put("name", template.name)
-                    .put("updatedAt", template.updatedAt)
-                    .put("documentMode", template.documentMode.name)
-                    .put("settings", settingsToJson(template.settings))
-                    .apply {
-                        template.pairDocument?.let { put("pairDocument", pairToJson(it)) }
-                    },
-            )
-        }
+        templates.forEach { template -> put(templateToJson(template)) }
     }.toString()
+
+    private fun templateToJson(template: CoupletTemplate): JSONObject = JSONObject()
+        .put("id", template.id)
+        .put("name", template.name)
+        .put("updatedAt", template.updatedAt)
+        .put("documentMode", template.documentMode.name)
+        .put("settings", settingsToJson(template.settings))
+        .apply {
+            template.pairDocument?.let { put("pairDocument", pairToJson(it)) }
+        }
 
     private fun parseTemplates(json: String): List<CoupletTemplate> = runCatching {
         val array = if (json.isBlank()) JSONArray() else JSONArray(json)
         buildList {
             for (index in 0 until array.length()) {
-                val item = array.getJSONObject(index)
-                add(
-                    CoupletTemplate(
-                        id = item.getString("id"),
-                        name = item.optString("name", "未命名模板"),
-                        settings = settingsFromJson(item.getJSONObject("settings")),
-                        updatedAt = item.optLong("updatedAt", 0L),
-                        documentMode = enumOrDefault(
-                            item.optString("documentMode"),
-                            DocumentMode.SINGLE,
-                        ),
-                        pairDocument = item.optJSONObject("pairDocument")?.let(::pairFromJson),
-                    ),
-                )
+                add(templateFromJson(array.getJSONObject(index)))
             }
         }.sortedByDescending { it.updatedAt }
     }.getOrDefault(emptyList())
+
+    private fun templateFromJson(item: JSONObject): CoupletTemplate {
+        val name = TemplateNameRules.normalize(item.optString("name", "未命名模板"))
+        if (name.isEmpty()) throw IllegalArgumentException("模板名称为空")
+        val documentMode = enumOrDefault(
+            item.optString("documentMode"),
+            DocumentMode.SINGLE,
+        )
+        val pairDocument = item.optJSONObject("pairDocument")?.let(::pairFromJson)
+        if (documentMode == DocumentMode.PAIR && pairDocument == null) {
+            throw IllegalArgumentException("双联模板缺少左右联内容")
+        }
+        val settings = if (documentMode == DocumentMode.PAIR) {
+            checkNotNull(pairDocument).selectedSettings
+        } else {
+            settingsFromJson(item.getJSONObject("settings"))
+        }
+        return CoupletTemplate(
+            id = item.optString("id").ifBlank { UUID.randomUUID().toString() },
+            name = name,
+            settings = settings,
+            updatedAt = item.optLong("updatedAt", 0L),
+            documentMode = documentMode,
+            pairDocument = pairDocument,
+        )
+    }
 
     private fun pairToJson(document: CoupletPairDocument): JSONObject = JSONObject().apply {
         put("left", settingsToJson(document.left))

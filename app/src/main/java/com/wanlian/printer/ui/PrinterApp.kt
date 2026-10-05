@@ -62,6 +62,8 @@ fun PrinterApp(
                 onLoadTemplate = viewModel::loadTemplate,
                 onRenameTemplate = viewModel::renameTemplate,
                 onDeleteTemplate = viewModel::deleteTemplate,
+                onShareTemplate = viewModel::shareTemplate,
+                onImportTemplate = viewModel::importTemplate,
                 onPrint = viewModel::printCouplet,
                 onEnablePairMode = viewModel::enablePairMode,
                 onKeepPairSideAsSingle = viewModel::keepPairSideAsSingle,

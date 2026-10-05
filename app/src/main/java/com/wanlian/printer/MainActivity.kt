@@ -4,6 +4,7 @@ import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -11,26 +12,56 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wanlian.printer.model.PrinterDevice
 import com.wanlian.printer.ui.PrinterApp
 import com.wanlian.printer.ui.WanlianTheme
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
+    private val pendingTemplateImport = MutableStateFlow<Uri?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingTemplateImport.value = intent.templateImportUri()
         setContent {
             WanlianTheme {
                 val mainViewModel: MainViewModel = viewModel()
+                val importUri by pendingTemplateImport.collectAsStateWithLifecycle()
+                LaunchedEffect(importUri) {
+                    importUri?.let { uri ->
+                        mainViewModel.importTemplate(uri)
+                        pendingTemplateImport.value = null
+                    }
+                }
                 BluetoothPermissionHost(mainViewModel)
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.templateImportUri()?.let { pendingTemplateImport.value = it }
+    }
+}
+
+private fun Intent.templateImportUri(): Uri? = when (action) {
+    Intent.ACTION_VIEW -> data ?: clipData?.getItemAt(0)?.uri
+    Intent.ACTION_SEND -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+    } else {
+        @Suppress("DEPRECATION")
+        getParcelableExtra(Intent.EXTRA_STREAM)
+    } ?: clipData?.getItemAt(0)?.uri
+    else -> null
 }
 
 @Composable

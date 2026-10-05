@@ -1,5 +1,8 @@
 package com.wanlian.printer.ui.editor
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -62,6 +65,7 @@ import com.wanlian.printer.model.DocumentMode
 import com.wanlian.printer.model.PrintGate
 import com.wanlian.printer.model.PrintSettings
 import com.wanlian.printer.model.TemplateNameRules
+import com.wanlian.printer.model.TemplateTransferRules
 import com.wanlian.printer.ui.components.CompactNumberControl
 import com.wanlian.printer.ui.components.CompactPreviewControls
 import com.wanlian.printer.ui.components.CoupletPreview
@@ -102,6 +106,8 @@ fun EditorScreen(
     onLoadTemplate: (CoupletTemplate) -> Unit,
     onRenameTemplate: (CoupletTemplate, String) -> Unit,
     onDeleteTemplate: (CoupletTemplate) -> Unit,
+    onShareTemplate: (CoupletTemplate) -> Unit,
+    onImportTemplate: (Uri) -> Unit,
     onPrint: () -> Unit,
     onEnablePairMode: () -> Unit,
     onKeepPairSideAsSingle: (CoupletSide) -> Unit,
@@ -123,6 +129,11 @@ fun EditorScreen(
     var showTemplates by remember { mutableStateOf(false) }
     var showModeDialog by remember { mutableStateOf(false) }
     var showKeepSideDialog by remember { mutableStateOf(false) }
+    val importTemplateLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri?.let(onImportTemplate)
+    }
     var focusPreview by rememberSaveable { mutableStateOf(false) }
     var selectedTool by rememberSaveable { mutableStateOf(EditorTool.TEXT) }
     var panelSnap by rememberSaveable { mutableStateOf(EditorPanelSnap.COMPACT) }
@@ -413,6 +424,16 @@ fun EditorScreen(
                 },
                 onRename = onRenameTemplate,
                 onDelete = onDeleteTemplate,
+                onShare = onShareTemplate,
+                onImport = {
+                    importTemplateLauncher.launch(
+                        arrayOf(
+                            TemplateTransferRules.MIME_TYPE,
+                            "application/json",
+                            "application/octet-stream",
+                        ),
+                    )
+                },
             )
         }
     }
@@ -902,6 +923,8 @@ private fun TemplateList(
     onLoad: (CoupletTemplate) -> Unit,
     onRename: (CoupletTemplate, String) -> Unit,
     onDelete: (CoupletTemplate) -> Unit,
+    onShare: (CoupletTemplate) -> Unit,
+    onImport: () -> Unit,
 ) {
     var renameTarget by remember { mutableStateOf<CoupletTemplate?>(null) }
     var renameName by remember { mutableStateOf("") }
@@ -911,7 +934,19 @@ private fun TemplateList(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
-            Text("本地模板", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("本地模板", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                OutlinedButton(onClick = onImport) { Text("导入模板") }
+            }
+            Text(
+                "分享为 .wanlian 文件，可在另一台设备直接导入。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         if (templates.isEmpty()) {
             item { Text("尚未保存模板", color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -960,6 +995,13 @@ private fun TemplateList(
                             expanded = menuExpanded,
                             onDismissRequest = { menuExpanded = false },
                         ) {
+                            DropdownMenuItem(
+                                text = { Text("分享模板") },
+                                onClick = {
+                                    menuExpanded = false
+                                    onShare(template)
+                                },
+                            )
                             DropdownMenuItem(
                                 text = { Text("重命名") },
                                 onClick = {
