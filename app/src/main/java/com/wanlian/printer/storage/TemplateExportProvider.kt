@@ -5,6 +5,9 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
+import android.os.Binder
+import android.os.Process
+import android.content.pm.PackageManager
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
@@ -25,6 +28,9 @@ class TemplateExportProvider : ContentProvider() {
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
         if (method != METHOD_EXPORT_TEMPLATES) return null
         val appContext = context ?: return null
+        check(appContext.packageManager.checkSignatures(Binder.getCallingUid(), Process.myUid()) == PackageManager.SIGNATURE_MATCH) {
+            "仅允许同签名挽联 App 迁移模板"
+        }
         val repository = TemplateRepository(appContext)
         val json = runBlocking { repository.allTemplatesJson() }
         return Bundle().apply { putString(KEY_TEMPLATES_JSON, json) }

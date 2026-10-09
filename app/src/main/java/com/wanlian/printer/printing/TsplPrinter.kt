@@ -8,7 +8,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import java.io.ByteArrayOutputStream
 import kotlin.math.min
-import kotlin.math.roundToInt
 
 enum class TsplPrintStage(val label: String) {
     SETTINGS_COMMANDS_SENT("发送设置"),
@@ -75,11 +74,7 @@ class TsplPrinter(
             bitmapDataBytes = packed.size,
             appliedSettings = appliedSettings,
         )
-        val pageSetup = buildString {
-            // TSPL without a unit means inches. Always send explicit millimetres.
-            append("SIZE ${rendered.paperWidthMm.roundToInt()} mm,${rendered.paperLengthMm.roundToInt()} mm\r\n")
-            append("GAP 0 mm,0 mm\r\n")
-        }.toByteArray(Charsets.US_ASCII)
+        val pageSetup = TsplPageCommands.build(rendered.paperWidthMm, rendered.paperLengthMm)
         val bitmapHeader = buildString {
             append("CLS\r\n")
             append("BITMAP 0,0,$widthBytes,${rendered.printMask.height},0,")

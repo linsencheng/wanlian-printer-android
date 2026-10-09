@@ -89,6 +89,8 @@ class BluetoothManager(
     private var pendingBleConnection: CompletableDeferred<BleEndpoint>? = null
     @Volatile private var pendingBleWrite: CompletableDeferred<Int>? = null
     private var negotiatedMtu = DEFAULT_BLE_MTU
+    private var discoveryGatt: BluetoothGatt? = null
+    private var discoveryStarted = false
     private var intentionalDisconnect = false
 
     fun clearError() {
@@ -259,12 +261,12 @@ class BluetoothManager(
             if (error is CancellationException) throw error
             // 分类处理写入失败：
             //  - 可恢复（请求被拒绝/繁忙耗尽，字节根本没发出去）→ 连接与打印机已接收的
-            //    字节流仍一致，保持连接有效，由调用方“整联重启”打印（整联都以 CLS 开头，安全）。
+            //    仅这一包未发出；先前的位图仍可能残留，调用方必须恢复打印机状态后再整联重启。
             //  - 超时/回调失败/链路断开 → 投递结果未知，必须断开重建连接，禁止续传偏移量。
             if (error is BleWriteRecoverableException) {
                 diagnostics?.append(
                     "BT_WRITE_RECOVERABLE",
-                    "本次 BLE 写入失败但未发出字节，连接保持有效；请整联重启打印。reason=$reason",
+                    "当前小包未发出，连接保持有效；已有位图可能残留，需要恢复后重试。reason=$reason",
                 )
             } else if (isConnected) {
                 handleConnectionLost("发送数据失败：$reason")
@@ -472,6 +474,8 @@ class BluetoothManager(
             .coerceAtMost(BLE_RETRY_MAX_DELAY_MS)
 
     private fun disconnectActiveConnection(updateState: Boolean) {
+        discoveryGatt = null
+        discoveryStarted = false
         pendingBleConnection?.cancel()
         pendingBleConnection = null
         pendingBleWrite?.cancel()
@@ -663,6 +667,15 @@ class BluetoothManager(
         }
     }
 
+    @Synchronized
+    private fun discoverServicesOnce(gatt: BluetoothGatt) {
+        if (discoveryGatt !== gatt || discoveryStarted || pendingBleConnection == null) return
+        discoveryStarted = true
+        if (!gatt.discoverServices()) {
+            pendingBleConnection?.completeExceptionally(IOException("BLE 服务发现请求被拒绝"))
+        }
+    }
+
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             diagnostics?.append(
@@ -672,23 +685,26 @@ class BluetoothManager(
             )
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
+                    discoveryGatt = gatt
+                    discoveryStarted = false
+                    val connecting = pendingBleConnection
                     val requested = runCatching { gatt.requestMtu(PREFERRED_BLE_MTU) }.getOrDefault(false)
                     // 兜底：部分固件不会回调 onMtuChanged。若长时间未触发，改用默认 MTU 直接
                     // 发现服务，避免连接卡死在等待 MTU 协商。正常固件会在此前完成，兜底不会触发。
                     scope.launch {
                         delay(MTU_NEGOTIATION_FALLBACK_MS)
-                        if (pendingBleConnection != null && bleEndpoint == null) {
+                        if (connecting != null && pendingBleConnection === connecting && discoveryGatt === gatt && !discoveryStarted) {
                             diagnostics?.append(
                                 "BLE_CALLBACK",
                                 "onMtuChanged 未及时回调，使用默认 MTU 发现服务",
                             )
-                            gatt.discoverServices()
+                            discoverServicesOnce(gatt)
                         }
                     }
-                    if (!requested) gatt.discoverServices()
+                    if (!requested) discoverServicesOnce(gatt)
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    pendingBleConnection?.completeExceptionally(
+                    if (discoveryGatt === gatt) pendingBleConnection?.completeExceptionally(
                         IOException("BLE 已断开，状态码 $status"),
                     )
                     if (bleEndpoint?.gatt == gatt) {
@@ -701,12 +717,14 @@ class BluetoothManager(
         }
 
         override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+            if (discoveryGatt !== gatt) return
             diagnostics?.append("BLE_CALLBACK", "onMtuChanged mtu=$mtu, status=$status")
             negotiatedMtu = if (status == BluetoothGatt.GATT_SUCCESS) mtu else DEFAULT_BLE_MTU
-            gatt.discoverServices()
+            discoverServicesOnce(gatt)
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+            if (discoveryGatt !== gatt) return
             diagnostics?.append("BLE_CALLBACK", "onServicesDiscovered status=$status")
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 pendingBleConnection?.completeExceptionally(IOException("读取 BLE 服务失败：$status"))
