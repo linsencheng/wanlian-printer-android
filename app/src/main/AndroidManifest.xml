@@ -30,6 +30,11 @@
         tools:targetApi="s" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
+    <!-- 允许跨包访问旧版（com.wanlian.printer）的模板导出 Provider，Android 11+ 包可见性需要。 -->
+    <queries>
+        <package android:name="com.wanlian.printer" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
@@ -65,6 +70,10 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <provider
+            android:name=".storage.TemplateExportProvider"
+            android:authorities="${applicationId}.templates"
+            android:exported="true" />
     </application>
 
 </manifest>

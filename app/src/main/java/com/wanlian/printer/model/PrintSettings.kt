@@ -27,7 +27,14 @@ data class PrintSettings(
     val printDirection: PrintDirection = PrintDirection.FORWARD,
     val reversePrinting: Boolean = false,
     val bitmapChunkSize: Int = 1024,
-    val chunkDelayMs: Long = 8L,
+    val chunkDelayMs: Long = 12L,
+    // 阶段性排空等待：每发送 drainPauseEveryBytes 字节位图数据后暂停 drainPauseMs，
+    // 给打印机 UART/引擎缓冲留出消化时间，避免连续大块位图导致 BLE 桥接芯片 FIFO 溢出。
+    // 以下为保守默认值（基于“桥接芯片 FIFO 较小”的假设），真机可据实调优。
+    val drainPauseEveryBytes: Int = 8 * 1024,
+    val drainPauseMs: Long = 150L,
+    // 位图全部发送完成后、发送 PRINT 前，等待打印机完成位图解析/写入帧缓冲。
+    val prePrintPauseMs: Long = 500L,
 )
 
 object PrintUnits {

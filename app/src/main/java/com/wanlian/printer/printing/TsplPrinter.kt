@@ -4,16 +4,17 @@ import android.graphics.Bitmap
 import com.wanlian.printer.bluetooth.BluetoothManager
 import com.wanlian.printer.model.PrintSettings
 import com.wanlian.printer.storage.DiagnosticLogRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import java.io.ByteArrayOutputStream
-import java.util.Locale
 import kotlin.math.min
+import kotlin.math.roundToInt
 
-enum class TsplPrintStage {
-    SETTINGS_COMMANDS_SENT,
-    BITMAP_SEND_STARTED,
-    BITMAP_SEND_COMPLETED,
-    PRINT_COMMAND_SENT,
+enum class TsplPrintStage(val label: String) {
+    SETTINGS_COMMANDS_SENT("发送设置"),
+    BITMAP_SEND_STARTED("上传位图"),
+    BITMAP_SEND_COMPLETED("位图完成"),
+    PRINT_COMMAND_SENT("已发打印命令"),
 }
 
 data class TsplPrintDiagnostics(
@@ -75,7 +76,8 @@ class TsplPrinter(
             appliedSettings = appliedSettings,
         )
         val pageSetup = buildString {
-            append("SIZE ${formatMm(rendered.paperWidthMm)} mm,${formatMm(rendered.paperLengthMm)} mm\r\n")
+            // TSPL without a unit means inches. Always send explicit millimetres.
+            append("SIZE ${rendered.paperWidthMm.roundToInt()} mm,${rendered.paperLengthMm.roundToInt()} mm\r\n")
             append("GAP 0 mm,0 mm\r\n")
         }.toByteArray(Charsets.US_ASCII)
         val bitmapHeader = buildString {
@@ -85,15 +87,21 @@ class TsplPrinter(
         val chunkSize = settings.bitmapChunkSize.coerceIn(256, 4096)
         val totalChunks = (packed.size + chunkSize - 1) / chunkSize
         val transportLabel = bluetoothManager.connectionInfo.value?.transport?.connectionLabel ?: "unknown"
+        val drainPauseEveryBytes = settings.drainPauseEveryBytes.coerceIn(512, 64 * 1024)
+        val drainPauseMs = settings.drainPauseMs.coerceIn(0L, 2_000L)
+        val prePrintPauseMs = settings.prePrintPauseMs.coerceIn(0L, 5_000L)
         var stage = PrintUploadStage.PAGE_SETUP
         var offset = 0
         var completedChunks = 0
+        var drainBytesSincePause = 0
         var nextProgressMilestone = 10
         diagnosticLogs?.append(
             "TSPL_JOB",
             "开始 width=${rendered.printMask.width}, height=${rendered.printMask.height}, " +
                 "paper=${rendered.paperWidthMm}x${rendered.paperLengthMm}mm, bytes=${packed.size}, " +
                 "chunks=$totalChunks, chunkSize=$chunkSize, delay=${settings.chunkDelayMs}ms, " +
+                "drainPauseEveryBytes=$drainPauseEveryBytes, drainPauseMs=$drainPauseMs, " +
+                "prePrintPauseMs=$prePrintPauseMs, " +
                 "density=${appliedSettings.density}, speed=${appliedSettings.speedInchesPerSecond}, " +
                 "transport=$transportLabel",
         )
@@ -121,10 +129,24 @@ class TsplPrinter(
                     while (nextProgressMilestone <= percent) nextProgressMilestone += 10
                 }
                 onProgress(offset.toFloat() / packed.size.coerceAtLeast(1))
-                // SPP printer input buffers are often small; BLE writes are throttled again per MTU.
+                // 应用层分块间隔：SPP 输入缓冲通常较小；BLE 在 MTU 层还会再分片。
                 delay(settings.chunkDelayMs.coerceIn(0L, 100L))
+                // 阶段性排空：BLE 写入成功只代表 ATT 层已确认，不代表打印机引擎已消化数据。
+                // 连续推送大块位图可能让打印机桥接芯片 FIFO 溢出。这里按“桥接 FIFO 较小”的
+                // 假设，每发送一段位图就暂停一次；真机可调 drainPauseEveryBytes / drainPauseMs。
+                drainBytesSincePause += count
+                if (drainBytesSincePause >= drainPauseEveryBytes) {
+                    diagnosticLogs?.append(
+                        "TSPL_DRAIN_PAUSE",
+                        "offset=$offset/${packed.size}, pause=${drainPauseMs}ms",
+                    )
+                    delay(drainPauseMs)
+                    drainBytesSincePause = 0
+                }
             }
             onStage(TsplPrintStage.BITMAP_SEND_COMPLETED, diagnostics)
+            // 打印前等待：让打印机完成位图解析并写入帧缓冲后再触发 PRINT，避免 PRINT 先于数据落盘。
+            delay(prePrintPauseMs)
             stage = PrintUploadStage.PRINT_COMMAND
             bluetoothManager.write("\r\nPRINT 1,1\r\n".toByteArray(Charsets.US_ASCII))
             onStage(TsplPrintStage.PRINT_COMMAND_SENT, diagnostics)
@@ -134,6 +156,7 @@ class TsplPrinter(
                 "完成 bytes=$offset/${packed.size}, chunks=$completedChunks/$totalChunks, PRINT 已发送",
             )
         } catch (error: Throwable) {
+            if (error is CancellationException) throw error
             val failure = if (error is PrintUploadException) {
                 error
             } else {
@@ -199,8 +222,5 @@ class TsplPrinter(
 
     private fun encodeLogicalPrintBitsForXpTt426b(logicalPrintBits: Int): Int =
         logicalPrintBits xor 0xff
-
-    private fun formatMm(value: Float): String =
-        String.format(Locale.US, "%.1f", value)
 
 }

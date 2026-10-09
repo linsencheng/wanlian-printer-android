@@ -65,6 +65,9 @@ fun PrinterApp(
                 onShareTemplate = viewModel::shareTemplate,
                 onImportTemplate = viewModel::importTemplate,
                 onPrint = viewModel::printCouplet,
+                onStopPrinting = viewModel::stopPrinting,
+                onPrintPairSide = viewModel::printPairSide,
+                onPrintOtherPairSide = viewModel::printOtherPairSide,
                 onEnablePairMode = viewModel::enablePairMode,
                 onKeepPairSideAsSingle = viewModel::keepPairSideAsSingle,
                 onSelectCoupletSide = viewModel::selectCoupletSide,
@@ -91,11 +94,13 @@ fun PrinterApp(
                 onOpenDevices = { page = AppPage.DEVICE },
                 onSettingsChange = viewModel::updateSettings,
                 onAutoReconnectChange = viewModel::setAutoReconnect,
+                onReimportLegacyTemplates = viewModel::reimportLegacyTemplates,
                 onPrintTest = viewModel::printTestPage,
                 onPrintPolarityTest = viewModel::printPolarityTest,
                 onApplyPrinterSettings = viewModel::applyPrinterSettings,
                 onRefreshDiagnosticLogs = viewModel::refreshDiagnosticLogs,
                 onClearDiagnosticLogs = viewModel::clearDiagnosticLogs,
+                onSelectDiagnosticLogDate = viewModel::selectDiagnosticLogDate,
             )
         }
         SnackbarHost(

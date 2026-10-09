@@ -28,7 +28,7 @@ android {
     buildToolsVersion = "36.0.0"
 
     defaultConfig {
-        applicationId = "com.wanlian.printer"
+        applicationId = "com.wanlian.printer.beta"
         minSdk = 26
         targetSdk = 35
         versionCode = automaticVersionCode
@@ -74,6 +74,12 @@ androidComponents {
             )
         }
     }
+}
+
+// Ensure Kotlin unit-test outputs are available to Gradle's test worker as well
+// as to test discovery (AGP/Kotlin can wire only the latter on this toolchain).
+tasks.withType<Test>().configureEach {
+    doFirst { classpath += files(testClassesDirs) }
 }
 
 dependencies {

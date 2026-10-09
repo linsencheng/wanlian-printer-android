@@ -11,7 +11,6 @@ import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager as AndroidBluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothSocket
-import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.content.BroadcastReceiver
@@ -29,6 +28,8 @@ import com.wanlian.printer.model.PrinterConnectionInfo
 import com.wanlian.printer.model.PrinterDevice
 import com.wanlian.printer.storage.DiagnosticLogRepository
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -86,7 +87,7 @@ class BluetoothManager(
     private var classicSocket: BluetoothSocket? = null
     private var bleEndpoint: BleEndpoint? = null
     private var pendingBleConnection: CompletableDeferred<BleEndpoint>? = null
-    private var pendingBleWrite: CompletableDeferred<Int>? = null
+    @Volatile private var pendingBleWrite: CompletableDeferred<Int>? = null
     private var negotiatedMtu = DEFAULT_BLE_MTU
     private var intentionalDisconnect = false
 
@@ -235,9 +236,9 @@ class BluetoothManager(
 
     suspend fun write(bytes: ByteArray) = writeMutex.withLock {
         check(isConnected) { "打印机连接已断开" }
+        val socket = classicSocket
+        val endpoint = bleEndpoint
         try {
-            val socket = classicSocket
-            val endpoint = bleEndpoint
             when {
                 socket != null -> withContext(Dispatchers.IO) {
                     socket.outputStream.write(bytes)
@@ -254,7 +255,20 @@ class BluetoothManager(
                 error,
             )
             val reason = error.message ?: error::class.java.simpleName
-            handleConnectionLost("发送数据失败：$reason")
+            // 用户主动断开 / 协程取消不是“连接丢失”，直接向上抛，不触发 handleConnectionLost。
+            if (error is CancellationException) throw error
+            // 分类处理写入失败：
+            //  - 可恢复（请求被拒绝/繁忙耗尽，字节根本没发出去）→ 连接与打印机已接收的
+            //    字节流仍一致，保持连接有效，由调用方“整联重启”打印（整联都以 CLS 开头，安全）。
+            //  - 超时/回调失败/链路断开 → 投递结果未知，必须断开重建连接，禁止续传偏移量。
+            if (error is BleWriteRecoverableException) {
+                diagnostics?.append(
+                    "BT_WRITE_RECOVERABLE",
+                    "本次 BLE 写入失败但未发出字节，连接保持有效；请整联重启打印。reason=$reason",
+                )
+            } else if (isConnected) {
+                handleConnectionLost("发送数据失败：$reason")
+            }
             throw IOException("蓝牙发送 ${bytes.size} 字节失败：$reason", error)
         }
     }
@@ -323,34 +337,139 @@ class BluetoothManager(
         while (offset < bytes.size) {
             val count = minOf(payloadSize, bytes.size - offset)
             val payload = bytes.copyOfRange(offset, offset + count)
-            val withResponse = endpoint.writeType == BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            val writeDeferred = if (withResponse) CompletableDeferred<Int>() else null
-            pendingBleWrite = writeDeferred
-            val accepted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                endpoint.gatt.writeCharacteristic(
-                    endpoint.characteristic,
-                    payload,
-                    endpoint.writeType,
-                ) == BluetoothStatusCodes.SUCCESS
-            } else {
-                @Suppress("DEPRECATION")
-                endpoint.characteristic.value = payload
-                @Suppress("DEPRECATION")
-                endpoint.characteristic.writeType = endpoint.writeType
-                @Suppress("DEPRECATION")
-                endpoint.gatt.writeCharacteristic(endpoint.characteristic)
-            }
-            check(accepted) { "BLE 写入请求被拒绝" }
-            if (writeDeferred != null) {
-                val status = withTimeout(BLE_WRITE_TIMEOUT_MS) { writeDeferred.await() }
-                check(status == BluetoothGatt.GATT_SUCCESS) { "BLE 写入失败，状态码 $status" }
-            } else {
-                delay(BLE_NO_RESPONSE_DELAY_MS)
-            }
-            pendingBleWrite = null
+            writeBlePayloadWithRetry(
+                endpoint = endpoint,
+                payload = payload,
+                offset = offset,
+                totalBytes = bytes.size,
+            )
             offset += count
         }
     }
+
+    private suspend fun writeBlePayloadWithRetry(
+        endpoint: BleEndpoint,
+        payload: ByteArray,
+        offset: Int,
+        totalBytes: Int,
+    ) {
+        val withResponse = endpoint.writeType == BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        var attempt = 1
+        while (true) {
+            check(isConnected && bleEndpoint?.gatt === endpoint.gatt) { "BLE 连接已断开" }
+            val writeDeferred = if (withResponse) CompletableDeferred<Int>() else null
+            pendingBleWrite = writeDeferred
+            val requestStatus = try {
+                enqueueBleWrite(endpoint, payload)
+            } catch (error: Throwable) {
+                pendingBleWrite = null
+                throw error
+            }
+
+            if (requestStatus == BLE_STATUS_SUCCESS) {
+                if (writeDeferred != null) {
+                    val callbackStatus = try {
+                        withTimeout(BLE_WRITE_TIMEOUT_MS) { writeDeferred.await() }
+                    } catch (timeout: TimeoutCancellationException) {
+                        // 超时：字节可能已部分送达，投递结果未知，禁止重放；断开重建。
+                        throw BleWriteTimeoutException(
+                            "BLE 写入 ${payload.size} 字节超时（>${BLE_WRITE_TIMEOUT_MS}ms），" +
+                                "offset=$offset/$totalBytes",
+                            timeout,
+                        )
+                    } finally {
+                        pendingBleWrite = null
+                    }
+                    if (callbackStatus == BluetoothGatt.GATT_SUCCESS) return
+                    // An accepted request may already have delivered bytes. Replaying it
+                    // after a callback error can corrupt the printer's bitmap byte stream.
+                    throw IOException("BLE 回调失败 status=$callbackStatus，offset=$offset/$totalBytes；停止上传以避免重复数据")
+                }
+
+                pendingBleWrite = null
+                delay(BLE_NO_RESPONSE_DELAY_MS)
+                return
+            }
+
+            pendingBleWrite = null
+            val statusLabel = bleWriteRequestStatusLabel(requestStatus)
+            val retryable = isRetryableBleWriteRequestStatus(requestStatus)
+            if (!retryable) {
+                diagnostics?.append(
+                    "BLE_WRITE_REJECTED",
+                    "status=$requestStatus ($statusLabel), writeType=${endpoint.writeTypeLabel}, " +
+                        "offset=$offset/$totalBytes, payload=${payload.size}, " +
+                        "attempt=$attempt/$MAX_BLE_WRITE_ATTEMPTS, mtu=${endpoint.mtu}",
+                )
+                throw BleWriteRejectedException(
+                    "BLE 写入请求被拒绝：$statusLabel ($requestStatus)",
+                )
+            }
+            if (attempt >= MAX_BLE_WRITE_ATTEMPTS) {
+                diagnostics?.append(
+                    "BLE_WRITE_GIVE_UP",
+                    "status=$requestStatus ($statusLabel), writeType=${endpoint.writeTypeLabel}, " +
+                        "offset=$offset/$totalBytes, payload=${payload.size}, " +
+                        "attempt=$attempt/$MAX_BLE_WRITE_ATTEMPTS, mtu=${endpoint.mtu}",
+                )
+                throw BleWriteRetryExhaustedException(
+                    "BLE 写入请求持续繁忙，已重试 $MAX_BLE_WRITE_ATTEMPTS 次：" +
+                        "$statusLabel ($requestStatus)",
+                )
+            }
+
+            val retryDelayMs = bleRetryDelayMs(attempt)
+            diagnostics?.append(
+                "BLE_WRITE_RETRY",
+                "status=$requestStatus ($statusLabel), writeType=${endpoint.writeTypeLabel}, " +
+                    "offset=$offset/$totalBytes, payload=${payload.size}, " +
+                    "attempt=$attempt/$MAX_BLE_WRITE_ATTEMPTS, delay=${retryDelayMs}ms, " +
+                    "mtu=${endpoint.mtu}",
+            )
+            delay(retryDelayMs)
+            attempt += 1
+        }
+    }
+
+    private fun enqueueBleWrite(endpoint: BleEndpoint, payload: ByteArray): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            endpoint.gatt.writeCharacteristic(
+                endpoint.characteristic,
+                payload,
+                endpoint.writeType,
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            endpoint.characteristic.value = payload
+            @Suppress("DEPRECATION")
+            endpoint.characteristic.writeType = endpoint.writeType
+            @Suppress("DEPRECATION")
+            if (endpoint.gatt.writeCharacteristic(endpoint.characteristic)) {
+                BLE_STATUS_SUCCESS
+            } else {
+                LEGACY_BLE_WRITE_REQUEST_REJECTED
+            }
+        }
+
+    private fun isRetryableBleWriteRequestStatus(status: Int): Boolean =
+        status == BLE_STATUS_ERROR_GATT_WRITE_REQUEST_BUSY ||
+            status == LEGACY_BLE_WRITE_REQUEST_REJECTED
+
+    private fun bleWriteRequestStatusLabel(status: Int): String = when (status) {
+        BLE_STATUS_SUCCESS -> "SUCCESS"
+        BLE_STATUS_ERROR_GATT_WRITE_REQUEST_BUSY -> "ERROR_GATT_WRITE_REQUEST_BUSY"
+        BLE_STATUS_ERROR_GATT_WRITE_NOT_ALLOWED -> "ERROR_GATT_WRITE_NOT_ALLOWED"
+        BLE_STATUS_ERROR_MISSING_CONNECT_PERMISSION ->
+            "ERROR_MISSING_BLUETOOTH_CONNECT_PERMISSION"
+        BLE_STATUS_ERROR_BLUETOOTH_NOT_ENABLED -> "ERROR_BLUETOOTH_NOT_ENABLED"
+        BLE_STATUS_ERROR_UNKNOWN -> "ERROR_UNKNOWN"
+        LEGACY_BLE_WRITE_REQUEST_REJECTED -> "LEGACY_WRITE_REQUEST_REJECTED"
+        else -> "STATUS_$status"
+    }
+
+    private fun bleRetryDelayMs(attempt: Int): Long =
+        (BLE_RETRY_INITIAL_DELAY_MS shl (attempt - 1).coerceAtMost(4))
+            .coerceAtMost(BLE_RETRY_MAX_DELAY_MS)
 
     private fun disconnectActiveConnection(updateState: Boolean) {
         pendingBleConnection?.cancel()
@@ -447,6 +566,8 @@ class BluetoothManager(
                     properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
             }
             .sortedByDescending { characteristic ->
+                // Keep the existing printer-characteristic preference; the selected characteristic
+                // still uses WRITE_WITH_RESPONSE below whenever it supports that safer mode.
                 characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
             }
             .firstOrNull()
@@ -552,6 +673,18 @@ class BluetoothManager(
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     val requested = runCatching { gatt.requestMtu(PREFERRED_BLE_MTU) }.getOrDefault(false)
+                    // 兜底：部分固件不会回调 onMtuChanged。若长时间未触发，改用默认 MTU 直接
+                    // 发现服务，避免连接卡死在等待 MTU 协商。正常固件会在此前完成，兜底不会触发。
+                    scope.launch {
+                        delay(MTU_NEGOTIATION_FALLBACK_MS)
+                        if (pendingBleConnection != null && bleEndpoint == null) {
+                            diagnostics?.append(
+                                "BLE_CALLBACK",
+                                "onMtuChanged 未及时回调，使用默认 MTU 发现服务",
+                            )
+                            gatt.discoverServices()
+                        }
+                    }
                     if (!requested) gatt.discoverServices()
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
@@ -585,12 +718,19 @@ class BluetoothManager(
                 return
             }
             val writeType = if (
-                characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
+                characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0
             ) {
-                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-            } else {
                 BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            } else {
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
             }
+            val payloadSize = (negotiatedMtu - 3).coerceIn(20, 244)
+            diagnostics?.append(
+                "BLE_READY",
+                "mtu=$negotiatedMtu, payloadSize=$payloadSize, " +
+                    "writeType=${writeTypeLabel(writeType)}, " +
+                    "service=${characteristic.service?.uuid}, characteristic=${characteristic.uuid}",
+            )
             pendingBleConnection?.complete(
                 BleEndpoint(gatt, characteristic, negotiatedMtu, writeType),
             )
@@ -601,6 +741,8 @@ class BluetoothManager(
             characteristic: BluetoothGattCharacteristic,
             status: Int,
         ) {
+            val endpoint = bleEndpoint
+            if (endpoint?.gatt !== gatt || endpoint.characteristic.uuid != characteristic.uuid) return
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 diagnostics?.append("BLE_WRITE_FAILED", "onCharacteristicWrite status=$status")
             }
@@ -626,13 +768,47 @@ class BluetoothManager(
         val writeType: Int,
     )
 
+    private val BleEndpoint.writeTypeLabel: String get() = writeTypeLabel(writeType)
+
+    /**
+     * 可恢复的 BLE 写入失败：请求在发出前就被拒绝（繁忙耗尽 / 不允许 / 权限等），
+     * 因此没有任何字节被发送，链路与打印机已接收的字节流保持一致。
+     * 调用方对此类失败必须“整联重启”打印，绝不能按偏移量续传。
+     */
+    private open class BleWriteRecoverableException(message: String) : IOException(message)
+
+    private class BleWriteRejectedException(message: String) : BleWriteRecoverableException(message)
+
+    private class BleWriteRetryExhaustedException(message: String) : BleWriteRecoverableException(message)
+
+    /** 写入超时：字节可能已部分送达，投递结果未知，必须断开重建连接。 */
+    private class BleWriteTimeoutException(message: String, cause: Throwable) : IOException(message, cause)
+
+    private fun writeTypeLabel(writeType: Int): String = when (writeType) {
+        BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT -> "WRITE_WITH_RESPONSE"
+        BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE -> "WRITE_WITHOUT_RESPONSE"
+        else -> "WRITE_TYPE_$writeType"
+    }
+
     companion object {
         private const val LOG_TAG = "BluetoothManager"
         private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
         private const val SCAN_DURATION_MS = 12_000L
         private const val CONNECTION_TIMEOUT_MS = 15_000L
+        private const val MTU_NEGOTIATION_FALLBACK_MS = 2_500L
         private const val BLE_WRITE_TIMEOUT_MS = 5_000L
-        private const val BLE_NO_RESPONSE_DELAY_MS = 12L
+        private const val BLE_NO_RESPONSE_DELAY_MS = 20L
+        private const val MAX_BLE_WRITE_ATTEMPTS = 6
+        private const val BLE_RETRY_INITIAL_DELAY_MS = 25L
+        private const val BLE_RETRY_MAX_DELAY_MS = 400L
+        private const val LEGACY_BLE_WRITE_REQUEST_REJECTED = -1
+        // BluetoothStatusCodes values are copied here because minSdk 26 predates that API.
+        private const val BLE_STATUS_SUCCESS = 0
+        private const val BLE_STATUS_ERROR_BLUETOOTH_NOT_ENABLED = 1
+        private const val BLE_STATUS_ERROR_MISSING_CONNECT_PERMISSION = 6
+        private const val BLE_STATUS_ERROR_GATT_WRITE_NOT_ALLOWED = 200
+        private const val BLE_STATUS_ERROR_GATT_WRITE_REQUEST_BUSY = 201
+        private const val BLE_STATUS_ERROR_UNKNOWN = Int.MAX_VALUE
         private const val DEFAULT_BLE_MTU = 23
         private const val PREFERRED_BLE_MTU = 247
     }

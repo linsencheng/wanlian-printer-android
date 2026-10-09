@@ -35,6 +35,7 @@ import com.wanlian.printer.model.TemplateTransferRules
 import com.wanlian.printer.model.renamedTo
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
 import org.json.JSONObject
@@ -147,6 +148,33 @@ class TemplateRepository(context: Context) {
 
     suspend fun setAutoReconnect(enabled: Boolean) {
         dataStore.edit { preferences -> preferences[AUTO_RECONNECT] = enabled }
+    }
+
+    /** 返回当前全部模板的原始 JSON（供跨应用迁移导出）。 */
+    suspend fun allTemplatesJson(): String =
+        dataStore.data.first()[TEMPLATES_JSON].orEmpty()
+
+    /**
+     * 合并导入模板 JSON（与 [allTemplatesJson] 同格式的数组）。按 id 去重，只新增不覆盖，
+     * 返回实际新增的模板数量。
+     */
+    suspend fun importTemplates(json: String): Int {
+        val incoming = parseTemplates(json)
+        if (incoming.isEmpty()) return 0
+        var added = 0
+        dataStore.edit { preferences ->
+            val current = parseTemplates(preferences[TEMPLATES_JSON].orEmpty()).toMutableList()
+            val existingIds = current.mapTo(mutableSetOf()) { it.id }
+            incoming.forEach { template ->
+                if (template.id !in existingIds) {
+                    current += template
+                    existingIds += template.id
+                    added++
+                }
+            }
+            preferences[TEMPLATES_JSON] = templatesToJson(current.sortedByDescending { it.updatedAt })
+        }
+        return added
     }
 
     private fun safeData(): Flow<Preferences> = dataStore.data.catch { error ->

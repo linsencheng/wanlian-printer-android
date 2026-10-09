@@ -10,8 +10,8 @@ enum class DocumentMode(val label: String) {
 }
 
 enum class CoupletSide(val label: String) {
-    LEFT("左联"),
-    RIGHT("右联"),
+    LEFT("上联"),
+    RIGHT("下联"),
 }
 
 data class CoupletPairDocument(
@@ -77,6 +77,9 @@ data class CoupletPairDocument(
             reversePrinting = source.reversePrinting,
             bitmapChunkSize = source.bitmapChunkSize,
             chunkDelayMs = source.chunkDelayMs,
+            drainPauseEveryBytes = source.drainPauseEveryBytes,
+            drainPauseMs = source.drainPauseMs,
+            prePrintPauseMs = source.prePrintPauseMs,
         )
     }
 

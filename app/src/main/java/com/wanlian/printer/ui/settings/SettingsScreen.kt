@@ -61,11 +61,13 @@ fun SettingsScreen(
     onOpenDevices: () -> Unit,
     onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
     onAutoReconnectChange: (Boolean) -> Unit,
+    onReimportLegacyTemplates: () -> Unit,
     onPrintTest: () -> Unit,
     onPrintPolarityTest: () -> Unit,
     onApplyPrinterSettings: () -> Unit,
     onRefreshDiagnosticLogs: () -> Unit,
     onClearDiagnosticLogs: () -> Unit,
+    onSelectDiagnosticLogDate: (String) -> Unit,
 ) {
     var advancedExpanded by remember { mutableStateOf(false) }
     var showDiagnosticLogs by remember { mutableStateOf(false) }
@@ -148,6 +150,9 @@ fun SettingsScreen(
                 OutlinedButton(onClick = onOpenDevices, modifier = Modifier.fillMaxWidth()) {
                     Text("管理打印设备")
                 }
+                OutlinedButton(onClick = onReimportLegacyTemplates, modifier = Modifier.fillMaxWidth()) {
+                    Text("从旧版导入模板")
+                }
             }
 
             SectionTitle("高级设置")
@@ -170,14 +175,43 @@ fun SettingsScreen(
                     SettingSlider(
                         title = "分块间延迟",
                         value = state.settings.chunkDelayMs.toFloat(),
-                        valueRange = 0f..50f,
+                        valueRange = 0f..100f,
                         valueText = "${state.settings.chunkDelayMs} ms",
                         onValueChange = { value ->
                             onSettingsChange { it.copy(chunkDelayMs = value.toLong()) }
                         },
                     )
+                    SettingSlider(
+                        title = "排空间隔（每发送多少字节暂停）",
+                        value = state.settings.drainPauseEveryBytes.toFloat(),
+                        valueRange = 512f..65536f,
+                        valueText = "${state.settings.drainPauseEveryBytes} bytes",
+                        onValueChange = { value ->
+                            val aligned = (value.toInt() / 512 * 512).coerceIn(512, 65536)
+                            onSettingsChange { it.copy(drainPauseEveryBytes = aligned) }
+                        },
+                    )
+                    SettingSlider(
+                        title = "排空暂停时长",
+                        value = state.settings.drainPauseMs.toFloat(),
+                        valueRange = 0f..1000f,
+                        valueText = "${state.settings.drainPauseMs} ms",
+                        onValueChange = { value ->
+                            onSettingsChange { it.copy(drainPauseMs = value.toLong()) }
+                        },
+                    )
+                    SettingSlider(
+                        title = "打印前等待",
+                        value = state.settings.prePrintPauseMs.toFloat(),
+                        valueRange = 0f..2000f,
+                        valueText = "${state.settings.prePrintPauseMs} ms",
+                        onValueChange = { value ->
+                            onSettingsChange { it.copy(prePrintPauseMs = value.toLong()) }
+                        },
+                    )
                     Text(
-                        "默认 1024 bytes / 8 ms 已通过当前实机链路验证。BLE 内部仍按 MTU 再分片。",
+                        "长幅位图（约 792KB）连续发送时，打印机桥接芯片接收缓存可能积压，导致 BLE 写入被拒或断连。" +
+                            "以上参数为打印机留出消化时间。默认值偏保守、追求稳定；真机可逐步下调以提速。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -224,6 +258,18 @@ fun SettingsScreen(
             onDismissRequest = { showDiagnosticLogs = false },
             title = { Text("打印与蓝牙诊断日志") },
             text = {
+                Column {
+                    val dateIndex = state.diagnosticLogDates.indexOf(state.diagnosticLogDate)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(enabled = dateIndex > 0, onClick = {
+                            onSelectDiagnosticLogDate(state.diagnosticLogDates[dateIndex - 1])
+                        }) { Text("较新") }
+                        Text(state.diagnosticLogDate, modifier = Modifier.weight(1f))
+                        TextButton(enabled = dateIndex >= 0 && dateIndex < state.diagnosticLogDates.lastIndex,
+                            onClick = { onSelectDiagnosticLogDate(state.diagnosticLogDates[dateIndex + 1]) }
+                        ) { Text("较早") }
+                    }
+                    Text("最新记录在上方", style = MaterialTheme.typography.bodySmall)
                 SelectionContainer {
                     Text(
                         text = state.diagnosticLogText.ifBlank { "暂无诊断日志" },
@@ -233,6 +279,7 @@ fun SettingsScreen(
                             .verticalScroll(rememberScrollState()),
                         style = MaterialTheme.typography.bodySmall,
                     )
+                }
                 }
             },
             confirmButton = {
@@ -245,7 +292,7 @@ fun SettingsScreen(
             },
             dismissButton = {
                 Row {
-                    TextButton(onClick = onClearDiagnosticLogs) { Text("清空") }
+                    TextButton(onClick = onClearDiagnosticLogs) { Text("清空当天") }
                     TextButton(onClick = { showDiagnosticLogs = false }) { Text("关闭") }
                 }
             },
