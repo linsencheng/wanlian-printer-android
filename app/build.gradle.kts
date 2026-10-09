@@ -76,12 +76,6 @@ androidComponents {
     }
 }
 
-// Ensure Kotlin unit-test outputs are available to Gradle's test worker as well
-// as to test discovery (AGP/Kotlin can wire only the latter on this toolchain).
-tasks.withType<Test>().configureEach {
-    doFirst { classpath += files(testClassesDirs) }
-}
-
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)

@@ -274,6 +274,9 @@ class TemplateRepository(context: Context) {
         put("reversePrinting", settings.reversePrinting)
         put("bitmapChunkSize", settings.bitmapChunkSize)
         put("chunkDelayMs", settings.chunkDelayMs)
+        put("drainPauseEveryBytes", settings.drainPauseEveryBytes)
+        put("drainPauseMs", settings.drainPauseMs)
+        put("prePrintPauseMs", settings.prePrintPauseMs)
         put("border", borderToJson(settings.border))
         put("personBlock", personBlockToJson(settings.personBlock))
         put("footerLabel", footerLabelToJson(settings.footerLabel))
@@ -316,6 +319,9 @@ class TemplateRepository(context: Context) {
             reversePrinting = json.optBoolean("reversePrinting", defaults.reversePrinting),
             bitmapChunkSize = json.optInt("bitmapChunkSize", defaults.bitmapChunkSize),
             chunkDelayMs = json.optLong("chunkDelayMs", defaults.chunkDelayMs),
+            drainPauseEveryBytes = json.optInt("drainPauseEveryBytes", defaults.drainPauseEveryBytes),
+            drainPauseMs = json.optLong("drainPauseMs", defaults.drainPauseMs),
+            prePrintPauseMs = json.optLong("prePrintPauseMs", defaults.prePrintPauseMs),
             border = json.optJSONObject("border")?.let(::borderFromJson) ?: defaults.border,
             personBlock = personBlock,
             footerLabel = footerJson?.let(::footerLabelFromJson) ?: defaults.footerLabel,
