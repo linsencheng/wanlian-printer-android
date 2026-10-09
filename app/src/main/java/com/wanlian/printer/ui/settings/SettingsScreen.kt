@@ -9,10 +9,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,12 +32,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.unit.dp
 import com.wanlian.printer.MainUiState
+import com.wanlian.printer.model.ConnectionStatus
 import com.wanlian.printer.model.PrintDirection
 import com.wanlian.printer.model.PrintSettings
 import com.wanlian.printer.printing.RenderedBitmap
@@ -43,6 +49,9 @@ import com.wanlian.printer.ui.components.ChoiceChips
 import com.wanlian.printer.ui.components.SettingSlider
 import com.wanlian.printer.ui.components.SwitchRow
 import java.util.Locale
+import java.text.DateFormat
+import java.util.Date
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,10 +61,17 @@ fun SettingsScreen(
     onOpenDevices: () -> Unit,
     onSettingsChange: ((PrintSettings) -> PrintSettings) -> Unit,
     onAutoReconnectChange: (Boolean) -> Unit,
+    onReimportLegacyTemplates: () -> Unit,
     onPrintTest: () -> Unit,
     onPrintPolarityTest: () -> Unit,
+    onApplyPrinterSettings: () -> Unit,
+    onRefreshDiagnosticLogs: () -> Unit,
+    onClearDiagnosticLogs: () -> Unit,
+    onSelectDiagnosticLogDate: (String) -> Unit,
 ) {
     var advancedExpanded by remember { mutableStateOf(false) }
+    var showDiagnosticLogs by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
     Scaffold(
         topBar = {
             TopAppBar(
@@ -93,6 +109,20 @@ fun SettingsScreen(
                         onSettingsChange { it.copy(speedInchesPerSecond = value) }
                     },
                 )
+                PrinterSettingsDeliveryStatus(state)
+                Button(
+                    onClick = onApplyPrinterSettings,
+                    enabled = state.connectionStatus == ConnectionStatus.CONNECTED &&
+                        !state.isPrinting && !state.isApplyingPrinterSettings,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (state.isApplyingPrinterSettings) "正在写入打印机…" else "发送浓度和速度到打印机")
+                }
+                Text(
+                    "正式打印时也会在每一联图像前再次发送 DENSITY 和 SPEED。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Text("打印方向", style = MaterialTheme.typography.bodyMedium)
                 ChoiceChips(
                     values = PrintDirection.entries,
@@ -120,6 +150,9 @@ fun SettingsScreen(
                 OutlinedButton(onClick = onOpenDevices, modifier = Modifier.fillMaxWidth()) {
                     Text("管理打印设备")
                 }
+                OutlinedButton(onClick = onReimportLegacyTemplates, modifier = Modifier.fillMaxWidth()) {
+                    Text("从旧版导入模板")
+                }
             }
 
             SectionTitle("高级设置")
@@ -142,14 +175,43 @@ fun SettingsScreen(
                     SettingSlider(
                         title = "分块间延迟",
                         value = state.settings.chunkDelayMs.toFloat(),
-                        valueRange = 0f..50f,
+                        valueRange = 0f..100f,
                         valueText = "${state.settings.chunkDelayMs} ms",
                         onValueChange = { value ->
                             onSettingsChange { it.copy(chunkDelayMs = value.toLong()) }
                         },
                     )
+                    SettingSlider(
+                        title = "排空间隔（每发送多少字节暂停）",
+                        value = state.settings.drainPauseEveryBytes.toFloat(),
+                        valueRange = 512f..65536f,
+                        valueText = "${state.settings.drainPauseEveryBytes} bytes",
+                        onValueChange = { value ->
+                            val aligned = (value.toInt() / 512 * 512).coerceIn(512, 65536)
+                            onSettingsChange { it.copy(drainPauseEveryBytes = aligned) }
+                        },
+                    )
+                    SettingSlider(
+                        title = "排空暂停时长",
+                        value = state.settings.drainPauseMs.toFloat(),
+                        valueRange = 0f..1000f,
+                        valueText = "${state.settings.drainPauseMs} ms",
+                        onValueChange = { value ->
+                            onSettingsChange { it.copy(drainPauseMs = value.toLong()) }
+                        },
+                    )
+                    SettingSlider(
+                        title = "打印前等待",
+                        value = state.settings.prePrintPauseMs.toFloat(),
+                        valueRange = 0f..2000f,
+                        valueText = "${state.settings.prePrintPauseMs} ms",
+                        onValueChange = { value ->
+                            onSettingsChange { it.copy(prePrintPauseMs = value.toLong()) }
+                        },
+                    )
                     Text(
-                        "默认 1024 bytes / 8 ms 已通过当前实机链路验证。BLE 内部仍按 MTU 再分片。",
+                        "长幅位图（约 792KB）连续发送时，打印机桥接芯片接收缓存可能积压，导致 BLE 写入被拒或断连。" +
+                            "以上参数为打印机留出消化时间。默认值偏保守、追求稳定；真机可逐步下调以提速。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -159,7 +221,7 @@ fun SettingsScreen(
             HorizontalDivider()
             SectionTitle("打印机测试")
             Text(
-                "测试功能已从编辑首页移到这里。先执行白字极性测试，确认黑色背景不转印。",
+                "如果字迹发淡或覆盖不完整，先发送设置，再打印下面的小型覆盖测试。建议从浓度 12 / 速度 1.5 开始；仍发淡可试浓度 15 / 速度 1.0。",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             TestPreview(state.polarityTestPreview, height = 220)
@@ -167,15 +229,107 @@ fun SettingsScreen(
                 onClick = onPrintPolarityTest,
                 enabled = !state.isPrinting,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("打印白字极性测试") }
+            ) { Text("应用当前设置并打印覆盖测试") }
             TestPreview(state.testPreview, height = 280)
             OutlinedButton(
                 onClick = onPrintTest,
                 enabled = !state.isPrinting,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("打印完整测试页") }
+
+            HorizontalDivider()
+            SectionTitle("诊断日志")
+            Text(
+                "记录蓝牙连接、位图上传进度、断开回调和底层异常。日志保存在 App 内，重启后仍可查看。",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = {
+                    onRefreshDiagnosticLogs()
+                    showDiagnosticLogs = true
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("查看打印与蓝牙日志") }
         }
     }
+
+    if (showDiagnosticLogs) {
+        AlertDialog(
+            onDismissRequest = { showDiagnosticLogs = false },
+            title = { Text("打印与蓝牙诊断日志") },
+            text = {
+                Column {
+                    val dateIndex = state.diagnosticLogDates.indexOf(state.diagnosticLogDate)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(enabled = dateIndex > 0, onClick = {
+                            onSelectDiagnosticLogDate(state.diagnosticLogDates[dateIndex - 1])
+                        }) { Text("较新") }
+                        Text(state.diagnosticLogDate, modifier = Modifier.weight(1f))
+                        TextButton(enabled = dateIndex >= 0 && dateIndex < state.diagnosticLogDates.lastIndex,
+                            onClick = { onSelectDiagnosticLogDate(state.diagnosticLogDates[dateIndex + 1]) }
+                        ) { Text("较早") }
+                    }
+                    Text("最新记录在上方", style = MaterialTheme.typography.bodySmall)
+                SelectionContainer {
+                    Text(
+                        text = state.diagnosticLogText.ifBlank { "暂无诊断日志" },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 430.dp)
+                            .verticalScroll(rememberScrollState()),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(state.diagnosticLogText))
+                    },
+                    enabled = state.diagnosticLogText.isNotBlank(),
+                ) { Text("复制全部") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = onClearDiagnosticLogs) { Text("清空当天") }
+                    TextButton(onClick = { showDiagnosticLogs = false }) { Text("关闭") }
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun PrinterSettingsDeliveryStatus(state: MainUiState) {
+    val delivery = state.printerSettingsDelivery
+    val currentDevice = state.currentDevice
+    val currentDensity = state.settings.density.coerceIn(0, 15)
+    val currentSpeed = state.settings.speedInchesPerSecond.coerceIn(1f, 6f)
+    val matchesCurrent = delivery != null &&
+        delivery.deviceAddress == currentDevice?.address &&
+        delivery.settings.density == currentDensity &&
+        abs(delivery.settings.speedInchesPerSecond - currentSpeed) < 0.01f
+    val status = when {
+        state.isApplyingPrinterSettings -> "正在通过蓝牙写入设置命令…"
+        matchesCurrent -> {
+            val time = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(delivery!!.sentAtEpochMs))
+            "✓ 蓝牙写入成功（$time）\nDENSITY ${delivery.settings.density} · SPEED ${format(delivery.settings.speedInchesPerSecond, 1)} ips"
+        }
+        currentDevice == null -> "连接打印机后，可验证浓度和速度命令是否成功写入。"
+        delivery != null -> "当前滑块值尚未发送到这台打印机。"
+        else -> "尚未发送本组浓度和速度。"
+    }
+    Text(
+        status,
+        style = MaterialTheme.typography.bodyMedium,
+        color = if (matchesCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Text(
+        "“蓝牙写入成功”表示命令已交给打印机连接；此机型无可靠参数回读，因此请用覆盖测试确认实际热量和碳带覆盖。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable

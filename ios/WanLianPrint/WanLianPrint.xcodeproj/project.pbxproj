@@ -1,0 +1,313 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B10000000000000000000001 /* WanLianPrintApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000001 /* WanLianPrintApp.swift */; };
+		B10000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* ContentView.swift */; };
+		B10000000000000000000003 /* BLEModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000003 /* BLEModels.swift */; };
+		B10000000000000000000004 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000004 /* AppLogger.swift */; };
+		B10000000000000000000005 /* BLEWriteQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000005 /* BLEWriteQueue.swift */; };
+		B10000000000000000000006 /* BluetoothManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000006 /* BluetoothManager.swift */; };
+		B10000000000000000000007 /* PrintMask.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000007 /* PrintMask.swift */; };
+		B10000000000000000000008 /* TSPLPrinter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000008 /* TSPLPrinter.swift */; };
+		B10000000000000000000009 /* DeviceScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000009 /* DeviceScreen.swift */; };
+		B1000000000000000000000A /* BLEDiagnosticsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000A /* BLEDiagnosticsScreen.swift */; };
+		B1000000000000000000000B /* TestPrintScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000B /* TestPrintScreen.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		F10000000000000000000001 /* WanLianPrintApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WanLianPrintApp.swift; sourceTree = "<group>"; };
+		F10000000000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		F10000000000000000000003 /* BLEModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLEModels.swift; sourceTree = "<group>"; };
+		F10000000000000000000004 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
+		F10000000000000000000005 /* BLEWriteQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLEWriteQueue.swift; sourceTree = "<group>"; };
+		F10000000000000000000006 /* BluetoothManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BluetoothManager.swift; sourceTree = "<group>"; };
+		F10000000000000000000007 /* PrintMask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintMask.swift; sourceTree = "<group>"; };
+		F10000000000000000000008 /* TSPLPrinter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TSPLPrinter.swift; sourceTree = "<group>"; };
+		F10000000000000000000009 /* DeviceScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScreen.swift; sourceTree = "<group>"; };
+		F1000000000000000000000A /* BLEDiagnosticsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLEDiagnosticsScreen.swift; sourceTree = "<group>"; };
+		F1000000000000000000000B /* TestPrintScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestPrintScreen.swift; sourceTree = "<group>"; };
+		F1000000000000000000000C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		F1000000000000000000000D /* WanLianPrint.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WanLianPrint.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A10000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A10000000000000000000004 = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000005 /* WanLianPrint */,
+				A10000000000000000000006 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A10000000000000000000005 /* WanLianPrint */ = {
+			isa = PBXGroup;
+			children = (
+				F10000000000000000000001 /* WanLianPrintApp.swift */,
+				F10000000000000000000002 /* ContentView.swift */,
+				A10000000000000000000007 /* Models */,
+				A10000000000000000000008 /* Bluetooth */,
+				A10000000000000000000009 /* Printing */,
+				A1000000000000000000000A /* Utilities */,
+				A1000000000000000000000B /* Views */,
+				F1000000000000000000000C /* Info.plist */,
+			);
+			path = WanLianPrint;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000006 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F1000000000000000000000D /* WanLianPrint.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000007 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				F10000000000000000000003 /* BLEModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000008 /* Bluetooth */ = {
+			isa = PBXGroup;
+			children = (
+				F10000000000000000000005 /* BLEWriteQueue.swift */,
+				F10000000000000000000006 /* BluetoothManager.swift */,
+			);
+			path = Bluetooth;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000009 /* Printing */ = {
+			isa = PBXGroup;
+			children = (
+				F10000000000000000000007 /* PrintMask.swift */,
+				F10000000000000000000008 /* TSPLPrinter.swift */,
+			);
+			path = Printing;
+			sourceTree = "<group>";
+		};
+		A1000000000000000000000A /* Utilities */ = {
+			isa = PBXGroup;
+			children = (
+				F10000000000000000000004 /* AppLogger.swift */,
+			);
+			path = Utilities;
+			sourceTree = "<group>";
+		};
+		A1000000000000000000000B /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				F10000000000000000000009 /* DeviceScreen.swift */,
+				F1000000000000000000000A /* BLEDiagnosticsScreen.swift */,
+				F1000000000000000000000B /* TestPrintScreen.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A10000000000000000000002 /* WanLianPrint */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1000000000000000000000D /* Build configuration list for PBXNativeTarget "WanLianPrint" */;
+			buildPhases = (
+				A1000000000000000000000C /* Sources */,
+				A10000000000000000000003 /* Frameworks */,
+				A1000000000000000000000E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WanLianPrint;
+			productName = WanLianPrint;
+			productReference = F1000000000000000000000D /* WanLianPrint.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A10000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1640;
+				LastUpgradeCheck = 1640;
+				TargetAttributes = {
+					A10000000000000000000002 = {
+						CreatedOnToolsVersion = 16.4;
+					};
+				};
+			};
+			buildConfigurationList = A1000000000000000000000F /* Build configuration list for PBXProject "WanLianPrint" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = zh_CN;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+				zh_CN,
+			);
+			mainGroup = A10000000000000000000004;
+			productRefGroup = A10000000000000000000006 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A10000000000000000000002 /* WanLianPrint */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A1000000000000000000000E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A1000000000000000000000C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000001 /* WanLianPrintApp.swift in Sources */,
+				B10000000000000000000002 /* ContentView.swift in Sources */,
+				B10000000000000000000003 /* BLEModels.swift in Sources */,
+				B10000000000000000000004 /* AppLogger.swift in Sources */,
+				B10000000000000000000005 /* BLEWriteQueue.swift in Sources */,
+				B10000000000000000000006 /* BluetoothManager.swift in Sources */,
+				B10000000000000000000007 /* PrintMask.swift in Sources */,
+				B10000000000000000000008 /* TSPLPrinter.swift in Sources */,
+				B10000000000000000000009 /* DeviceScreen.swift in Sources */,
+				B1000000000000000000000A /* BLEDiagnosticsScreen.swift in Sources */,
+				B1000000000000000000000B /* TestPrintScreen.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		C10000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		C10000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		C10000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WanLianPrint/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wanlian.printer.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C10000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WanLianPrint/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wanlian.printer.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A1000000000000000000000D /* Build configuration list for PBXNativeTarget "WanLianPrint" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C10000000000000000000003 /* Debug */,
+				C10000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1000000000000000000000F /* Build configuration list for PBXProject "WanLianPrint" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C10000000000000000000001 /* Debug */,
+				C10000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A10000000000000000000001 /* Project object */;
+}

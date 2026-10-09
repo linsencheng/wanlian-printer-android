@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -127,9 +128,12 @@ fun DeviceScreen(
                     )
                 }
                 state.devices.forEachIndexed { index, device ->
+                    val activeTransport = state.connectionInfo?.transport
+                        ?: state.currentDevice?.transports?.singleOrNull()
                     DeviceRow(
                         device = device,
-                        isCurrent = state.currentDevice?.address == device.address,
+                        isCurrent = state.currentDevice?.address == device.address &&
+                            device.transports.singleOrNull() == activeTransport,
                         status = state.connectionStatus,
                         onConnect = { onConnect(device) },
                     )
@@ -164,11 +168,26 @@ private fun CurrentDeviceCard(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    state.currentDevice?.let {
-                        "${it.address} · ${state.connectionStatus.label}"
-                    } ?: state.connectionStatus.label,
+                    state.currentDevice?.address ?: "未选择设备",
                     style = MaterialTheme.typography.bodySmall,
                 )
+                Text(
+                    state.connectionStatus.label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = when (state.connectionStatus) {
+                        ConnectionStatus.CONNECTED -> Color(0xFF2E7D32)
+                        ConnectionStatus.ERROR -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+                state.connectionInfo?.let { info ->
+                    Text(
+                        "连接方式：${info.transport.connectionLabel}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
             }
             if (connected || state.connectionStatus == ConnectionStatus.CONNECTING) {
                 OutlinedButton(onClick = onDisconnect) { Text("断开") }
@@ -202,15 +221,19 @@ private fun DeviceRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(device.displayName, fontWeight = FontWeight.SemiBold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    device.displayName,
+                    modifier = Modifier.weight(1f),
+                    fontWeight = FontWeight.SemiBold,
+                )
+                device.transports.singleOrNull()?.let { TransportBadge(it) }
+            }
             Text(device.address, style = MaterialTheme.typography.bodySmall)
-            Text(
-                device.transports.joinToString(" / ") {
-                    if (it == BluetoothTransport.CLASSIC) "Bluetooth Classic" else "BLE"
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
         OutlinedButton(
             onClick = onConnect,
@@ -218,5 +241,21 @@ private fun DeviceRow(
         ) {
             Text(if (isCurrent && status == ConnectionStatus.CONNECTED) "已连接" else "连接")
         }
+    }
+}
+
+@Composable
+private fun TransportBadge(transport: BluetoothTransport) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Text(
+            "[${transport.badgeLabel}]",
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
     }
 }
